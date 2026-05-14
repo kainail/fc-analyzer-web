@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Link from "next/link";
 import { uploadDir } from "@/lib/upload-id";
+import { SIZE_LIMIT_ERROR_MESSAGE } from "@/lib/transcribe";
 
 type Metadata = {
   upload_id: string;
@@ -14,7 +15,31 @@ type Metadata = {
   audio_size_bytes: number;
   uploaded_at: string;
   status: string;
+  transcribed_at?: string;
+  error_message?: string;
+  error_at?: string;
 };
+
+const STATUS_LABEL: Record<string, string> = {
+  uploaded: "Uploaded — preparing for transcription",
+  transcribing: "Transcribing audio (this can take a few minutes)",
+  transcribed: "Transcript ready — analyzer not yet wired up",
+  error_transcription:
+    "Transcription failed. Check error_message in metadata for details",
+};
+
+const OVERSIZE_USER_MESSAGE =
+  "Audio file exceeds the 25MB limit. Chunking support is being added — for now, please split the recording into shorter segments before uploading.";
+
+function statusLabel(metadata: Metadata): string {
+  if (
+    metadata.status === "error_transcription" &&
+    metadata.error_message === SIZE_LIMIT_ERROR_MESSAGE
+  ) {
+    return OVERSIZE_USER_MESSAGE;
+  }
+  return STATUS_LABEL[metadata.status] ?? metadata.status;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -85,6 +110,10 @@ export default async function StatusPage({
     );
   }
 
+  const isError = metadata.status === "error_transcription";
+  const isOversize =
+    isError && metadata.error_message === SIZE_LIMIT_ERROR_MESSAGE;
+
   return (
     <main className="mx-auto max-w-md p-4 space-y-4">
       <Link href="/" className="text-sm underline">
@@ -92,13 +121,29 @@ export default async function StatusPage({
       </Link>
       <h1 className="text-2xl font-semibold">Status</h1>
 
-      <div className="border-2 border-zinc-300 dark:border-zinc-700 rounded-lg p-4">
+      <div
+        className={
+          isError
+            ? "border-2 border-red-500 bg-red-50 dark:bg-red-950/30 rounded-lg p-4"
+            : "border-2 border-zinc-300 dark:border-zinc-700 rounded-lg p-4"
+        }
+      >
         <div className="text-xs uppercase tracking-wide text-zinc-500">
           Current status
         </div>
-        <div className="text-2xl font-semibold capitalize mt-1">
-          {metadata.status}
+        <div
+          className={
+            "text-lg font-semibold mt-1 " +
+            (isError ? "text-red-700 dark:text-red-300" : "")
+          }
+        >
+          {statusLabel(metadata)}
         </div>
+        {isError && !isOversize && metadata.error_message && (
+          <pre className="whitespace-pre-wrap text-sm mt-3 text-red-900 dark:text-red-200">
+            {metadata.error_message}
+          </pre>
+        )}
       </div>
 
       <dl className="grid grid-cols-1 gap-3 text-sm">
@@ -111,10 +156,7 @@ export default async function StatusPage({
         <Row label="Rep" value={metadata.rep} />
         <Row label="Gym" value={metadata.gym} />
         <Row label="Prospect" value={metadata.prospect} />
-        <Row
-          label="Consultation date"
-          value={metadata.consultation_date}
-        />
+        <Row label="Consultation date" value={metadata.consultation_date} />
         <Row label="Outcome" value={metadata.outcome} />
         <Row
           label="Audio file"
@@ -124,6 +166,18 @@ export default async function StatusPage({
           label="Uploaded at"
           value={new Date(metadata.uploaded_at).toLocaleString()}
         />
+        {metadata.transcribed_at && (
+          <Row
+            label="Transcribed at"
+            value={new Date(metadata.transcribed_at).toLocaleString()}
+          />
+        )}
+        {metadata.error_at && (
+          <Row
+            label="Error at"
+            value={new Date(metadata.error_at).toLocaleString()}
+          />
+        )}
       </dl>
     </main>
   );

@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import fs from "node:fs";
 import path from "node:path";
 import busboy from "busboy";
+import { after } from "next/server";
 import {
   generateUniqueUploadId,
   uploadDir,
@@ -9,6 +10,7 @@ import {
   extensionFromFilename,
   ALLOWED_AUDIO_EXTENSIONS,
 } from "@/lib/upload-id";
+import { transcribeUpload } from "@/lib/transcribe";
 
 export const runtime = "nodejs";
 
@@ -262,6 +264,22 @@ export async function POST(request: Request) {
           ),
         );
       }
+
+      // Schedule transcription to run after the response is sent. This
+      // uses Next.js's after() so the request lifecycle stays clean and
+      // it works the same on Node and (future) serverless deployments.
+      // transcribeUpload never throws — the .catch is belt-and-suspenders.
+      const finalUploadId = uploadId;
+      after(async () => {
+        try {
+          await transcribeUpload(finalUploadId);
+        } catch (err) {
+          console.error(
+            `[upload] Background transcribe threw for ${finalUploadId}:`,
+            err,
+          );
+        }
+      });
 
       reply(Response.json({ upload_id: uploadId }, { status: 200 }));
     });
