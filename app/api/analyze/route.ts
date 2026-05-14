@@ -54,11 +54,7 @@ export async function POST(request: Request) {
     });
 
     const text = response.content
-      .filter(
-        (block): block is { type: "text"; text: string } =>
-          block.type === "text",
-      )
-      .map((block) => block.text)
+      .flatMap((block) => (block.type === "text" ? [block.text] : []))
       .join("\n");
 
     return Response.json({ text, usage: response.usage });
