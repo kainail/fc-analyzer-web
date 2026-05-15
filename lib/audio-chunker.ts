@@ -10,9 +10,17 @@
  *     timestamps cleanly, unlike stream-copy which depends on
  *     keyframe alignment)
  *
- * ffmpeg must be on PATH. Probe with probeFfmpeg() before calling
- * chunkAudio() or probeAudioDuration() — otherwise spawn errors
- * propagate as opaque ENOENT.
+ * Binary resolution order (first one that responds to `-version` wins):
+ *   1. FFMPEG_PATH env var (set in .env.local)
+ *   2. "ffmpeg" on PATH
+ *   3. Hardcoded Windows fallback at the WinGet Gyan.FFmpeg install
+ *      location on the dev machine — keeps things working when PATH
+ *      isn't configured.
+ *
+ * The resolved path is cached for the process lifetime so we only pay
+ * the probe cost once. Probe with probeFfmpeg() before chunkAudio() /
+ * probeAudioDuration() so a missing binary surfaces as a friendly
+ * error rather than an opaque ENOENT from inside the work path.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -20,18 +28,39 @@ import path from "node:path";
 
 export const CHUNK_DURATION_SECONDS = 600;
 
+// Last-resort fallback for the dev machine where WinGet installs
+// ffmpeg outside of PATH. Override with FFMPEG_PATH env on any other
+// machine.
+const HARDCODED_FFMPEG_FALLBACK =
+  "C:\\Users\\kaial\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe";
+
 export type AudioChunk = {
   chunkPath: string;
   startSec: number;
   durationSec: number;
 };
 
-function runFfmpeg(
+// undefined = not yet probed; null = probed and nothing worked
+let resolvedFfmpegPath: string | null | undefined;
+
+function tryRunFfmpeg(
+  binary: string,
   args: string[],
   opts: { captureStderr?: boolean; timeoutMs?: number } = {},
-): Promise<{ code: number; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("ffmpeg", args, { windowsHide: true });
+): Promise<{ code: number; stderr: string; spawnError: NodeJS.ErrnoException | null }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (
+      code: number,
+      stderr: string,
+      spawnError: NodeJS.ErrnoException | null,
+    ) => {
+      if (settled) return;
+      settled = true;
+      resolve({ code, stderr, spawnError });
+    };
+
+    const proc = spawn(binary, args, { windowsHide: true });
     let stderr = "";
     if (opts.captureStderr) {
       proc.stderr.on("data", (d) => {
@@ -45,30 +74,75 @@ function runFfmpeg(
     const timeout = opts.timeoutMs
       ? setTimeout(() => {
           proc.kill("SIGKILL");
-          reject(new Error(`ffmpeg timed out after ${opts.timeoutMs}ms`));
+          finish(
+            -1,
+            stderr,
+            Object.assign(new Error(`ffmpeg timed out after ${opts.timeoutMs}ms`), {
+              code: "ETIMEDOUT",
+            }),
+          );
         }, opts.timeoutMs)
       : null;
 
     proc.on("error", (err) => {
       if (timeout) clearTimeout(timeout);
-      reject(err);
+      finish(-1, stderr, err as NodeJS.ErrnoException);
     });
     proc.on("close", (code) => {
       if (timeout) clearTimeout(timeout);
-      resolve({ code: code ?? -1, stderr });
+      finish(code ?? -1, stderr, null);
     });
   });
 }
 
-export async function probeFfmpeg(): Promise<boolean> {
-  try {
-    const { code } = await runFfmpeg(["-hide_banner", "-version"], {
-      timeoutMs: 5000,
-    });
-    return code === 0;
-  } catch {
-    return false;
+async function resolveFfmpegBinary(): Promise<string | null> {
+  if (resolvedFfmpegPath !== undefined) return resolvedFfmpegPath;
+
+  const candidates: string[] = [];
+  if (process.env.FFMPEG_PATH?.trim()) {
+    candidates.push(process.env.FFMPEG_PATH.trim());
   }
+  candidates.push("ffmpeg");
+  if (
+    HARDCODED_FFMPEG_FALLBACK &&
+    !candidates.includes(HARDCODED_FFMPEG_FALLBACK)
+  ) {
+    candidates.push(HARDCODED_FFMPEG_FALLBACK);
+  }
+
+  for (const candidate of candidates) {
+    const { code, spawnError } = await tryRunFfmpeg(
+      candidate,
+      ["-hide_banner", "-version"],
+      { timeoutMs: 5000 },
+    );
+    if (!spawnError && code === 0) {
+      resolvedFfmpegPath = candidate;
+      return candidate;
+    }
+  }
+
+  resolvedFfmpegPath = null;
+  return null;
+}
+
+async function runFfmpeg(
+  args: string[],
+  opts: { captureStderr?: boolean; timeoutMs?: number } = {},
+): Promise<{ code: number; stderr: string }> {
+  const binary = await resolveFfmpegBinary();
+  if (!binary) {
+    throw Object.assign(new Error("ffmpeg binary not found"), {
+      code: "ENOENT",
+    });
+  }
+  const { code, stderr, spawnError } = await tryRunFfmpeg(binary, args, opts);
+  if (spawnError) throw spawnError;
+  return { code, stderr };
+}
+
+export async function probeFfmpeg(): Promise<boolean> {
+  return (await resolveFfmpegBinary()) !== null;
 }
 
 // Returns duration of the audio in seconds, parsed from ffmpeg's
