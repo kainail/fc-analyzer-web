@@ -4,5 +4,5 @@
 //
 // This file must remain free of Node-only imports.
 
-export const SIZE_LIMIT_ERROR_MESSAGE =
-  "File exceeds Whisper 25MB limit — chunking not yet implemented.";
+export const FFMPEG_MISSING_ERROR_MESSAGE =
+  "ffmpeg not found on PATH — install ffmpeg to enable chunking for files >25MB.";

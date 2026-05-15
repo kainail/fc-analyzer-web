@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { SIZE_LIMIT_ERROR_MESSAGE } from "@/lib/transcribe-constants";
+import { FFMPEG_MISSING_ERROR_MESSAGE } from "@/lib/transcribe-constants";
 
 export type Metadata = {
   upload_id: string;
@@ -24,6 +24,7 @@ export type Metadata = {
 
 const STATUS_LABEL: Record<string, string> = {
   uploaded: "Uploaded — preparing for transcription",
+  chunking: "Splitting large audio file into chunks for transcription",
   transcribing: "Transcribing audio (this can take a few minutes)",
   transcribed: "Transcript ready — queued for analysis",
   analyzing: "Analyzing call against your sales methodology",
@@ -34,8 +35,8 @@ const STATUS_LABEL: Record<string, string> = {
     "Analysis failed. Check error_message for details",
 };
 
-const OVERSIZE_USER_MESSAGE =
-  "Audio file exceeds the 25MB limit. Chunking support is being added — for now, please split the recording into shorter segments before uploading.";
+const FFMPEG_MISSING_USER_MESSAGE =
+  "This recording is larger than 25MB and needs to be split into chunks, but ffmpeg isn't installed on the server. Install ffmpeg (and make sure it's on PATH) to enable chunked transcription.";
 
 const TERMINAL_STATUSES = new Set([
   "transcribed",
@@ -56,9 +57,9 @@ function formatBytes(bytes: number): string {
 function statusLabel(metadata: Metadata): string {
   if (
     metadata.status === "error_transcription" &&
-    metadata.error_message === SIZE_LIMIT_ERROR_MESSAGE
+    metadata.error_message === FFMPEG_MISSING_ERROR_MESSAGE
   ) {
-    return OVERSIZE_USER_MESSAGE;
+    return FFMPEG_MISSING_USER_MESSAGE;
   }
   return STATUS_LABEL[metadata.status] ?? metadata.status;
 }
@@ -87,9 +88,9 @@ export default function StatusView({ initial }: { initial: Metadata }) {
   const isError =
     metadata.status === "error_transcription" ||
     metadata.status === "error_analysis";
-  const isOversize =
+  const isFfmpegMissing =
     metadata.status === "error_transcription" &&
-    metadata.error_message === SIZE_LIMIT_ERROR_MESSAGE;
+    metadata.error_message === FFMPEG_MISSING_ERROR_MESSAGE;
   const polling = !isTerminal && !connectionLost;
 
   useEffect(() => {
@@ -160,7 +161,7 @@ export default function StatusView({ initial }: { initial: Metadata }) {
         >
           {statusLabel(metadata)}
         </div>
-        {isError && !isOversize && metadata.error_message && (
+        {isError && !isFfmpegMissing && metadata.error_message && (
           <pre className="whitespace-pre-wrap text-sm mt-3 text-red-900 dark:text-red-200">
             {metadata.error_message}
           </pre>
