@@ -28,9 +28,19 @@
  *   uploaded → chunking (large files only) → transcribing → transcribed
  *                                                         → error_transcription
  *
- * This function never throws. All errors are logged via console.error
- * AND recorded in metadata.json. The caller's .catch() in after() is
- * defensive belt-and-suspenders only.
+ * This function never throws. Every code path is wrapped in a single
+ * top-level try/catch that always logs to console.error AND attempts
+ * to write status="error_transcription" + error_message + error_at
+ * to metadata.json so failures are never silent. If metadata.json
+ * itself can't be read, a minimal error record is written in its
+ * place. The caller's .catch() in after() is belt-and-suspenders.
+ *
+ * What try/catch CAN'T catch: process termination (dev server HMR
+ * reloads, OOM, kill -9). If the Next.js dev server restarts while a
+ * transcription is in-flight, the after() callback dies mid-await
+ * and the status stays at "transcribing" with no final write — no
+ * JS error fires. In dev, avoid editing source files while uploads
+ * are processing; in production, the process is stable.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -88,6 +98,47 @@ function tryWriteErrorMetadata(
       writeErr,
     );
   }
+}
+
+// Fallback for when metadata.json was unreadable at start of run.
+// Writes a minimal error record so the status page surfaces the
+// failure instead of staying stuck on a stale status.
+function tryWriteMinimalErrorMetadata(
+  metadataPath: string,
+  uploadId: string,
+  errorMessage: string,
+): void {
+  try {
+    fs.writeFileSync(
+      metadataPath,
+      JSON.stringify(
+        {
+          upload_id: uploadId,
+          status: "error_transcription",
+          error_message: errorMessage,
+          error_at: nowIso(),
+        },
+        null,
+        2,
+      ),
+    );
+  } catch (writeErr) {
+    console.error(
+      `[transcribe] Failed to write minimal error metadata for ${uploadId}:`,
+      writeErr,
+    );
+  }
+}
+
+function describeError(err: unknown): {
+  name: string;
+  message: string;
+  stack?: string;
+} {
+  if (err instanceof Error) {
+    return { name: err.name, message: err.message, stack: err.stack };
+  }
+  return { name: typeof err, message: String(err) };
 }
 
 // Stitch chunk responses into one verbose_json. Segment ids are
@@ -154,22 +205,29 @@ async function transcribeFile(
 export async function transcribeUpload(uploadId: string): Promise<void> {
   const dir = uploadDir(uploadId);
   const metadataPath = path.join(dir, "metadata.json");
-
-  const metadata = readMetadata(metadataPath);
-  if (!metadata) {
-    console.error(
-      `[transcribe] No metadata.json at ${metadataPath} — aborting transcription for ${uploadId}`,
-    );
-    return;
-  }
-
-  const audioPath = path.join(dir, metadata.audio_filename);
-  const needsChunking = metadata.audio_size_bytes > WHISPER_MAX_BYTES;
   const chunksDir = path.join(dir, "chunks");
 
-  let failingStep = "init";
+  let metadata: Metadata | null = null;
+  let failingStep = "read metadata";
+
+  console.log(`[transcribe] ${uploadId}: starting`);
 
   try {
+    metadata = readMetadata(metadataPath);
+    if (!metadata) {
+      const msg = `metadata.json unreadable at ${metadataPath}`;
+      console.error(`[transcribe] ${uploadId}: ${msg} — writing minimal error record`);
+      tryWriteMinimalErrorMetadata(metadataPath, uploadId, msg);
+      return;
+    }
+
+    const audioPath = path.join(dir, metadata.audio_filename);
+    const needsChunking = metadata.audio_size_bytes > WHISPER_MAX_BYTES;
+
+    console.log(
+      `[transcribe] ${uploadId}: audio=${metadata.audio_filename} size=${metadata.audio_size_bytes}B needsChunking=${needsChunking}`,
+    );
+
     let response: TranscriptionVerbose;
 
     if (needsChunking) {
@@ -178,6 +236,9 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
       failingStep = "probe ffmpeg";
       const haveFfmpeg = await probeFfmpeg();
       if (!haveFfmpeg) {
+        console.error(
+          `[transcribe] ${uploadId}: ffmpeg unavailable, cannot chunk`,
+        );
         tryWriteErrorMetadata(
           metadataPath,
           metadata,
@@ -192,8 +253,10 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
       writeMetadata(metadataPath, metadata);
 
       failingStep = "chunk audio";
+      console.log(`[transcribe] ${uploadId}: chunking audio`);
       const chunks = await chunkAudio(audioPath, chunksDir);
       metadata.chunk_count = chunks.length;
+      console.log(`[transcribe] ${uploadId}: produced ${chunks.length} chunks`);
 
       failingStep = "status transcribing";
       metadata.status = "transcribing";
@@ -205,6 +268,7 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
       }> = [];
       for (let i = 0; i < chunks.length; i++) {
         failingStep = `whisper call chunk ${i + 1}/${chunks.length}`;
+        console.log(`[transcribe] ${uploadId}: ${failingStep}`);
         const chunkResponse = await transcribeFile(chunks[i].chunkPath);
         chunkResponses.push({ chunk: chunks[i], response: chunkResponse });
       }
@@ -217,7 +281,11 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
       writeMetadata(metadataPath, metadata);
 
       failingStep = "whisper call";
+      console.log(`[transcribe] ${uploadId}: calling Whisper`);
       response = await transcribeFile(audioPath);
+      console.log(
+        `[transcribe] ${uploadId}: Whisper returned ${response.text?.length ?? 0} chars`,
+      );
     }
 
     failingStep = "transcript.txt write";
@@ -239,6 +307,7 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
     metadata.status = "transcribed";
     metadata.transcribed_at = nowIso();
     writeMetadata(metadataPath, metadata);
+    console.log(`[transcribe] ${uploadId}: done — status=transcribed`);
 
     // Chain to analysis. Fire-and-forget via after() so we don't block
     // the rest of this after() callback's completion. analyzeUpload
@@ -254,17 +323,18 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
       }
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const { name, message, stack } = describeError(err);
     console.error(
-      `[transcribe] Failed at step "${failingStep}" for ${uploadId}:`,
-      err,
+      `[transcribe] ${uploadId}: UNCAUGHT at step "${failingStep}" — ${name}: ${message}`,
     );
-    tryWriteErrorMetadata(
-      metadataPath,
-      metadata,
-      `Failed at ${failingStep}: ${message}`,
-      uploadId,
-    );
+    if (stack) console.error(stack);
+
+    const recordedMessage = `Failed at ${failingStep}: ${name}: ${message}`;
+    if (metadata) {
+      tryWriteErrorMetadata(metadataPath, metadata, recordedMessage, uploadId);
+    } else {
+      tryWriteMinimalErrorMetadata(metadataPath, uploadId, recordedMessage);
+    }
     // chunks/ intentionally left in place for inspection on failure.
   }
 }
