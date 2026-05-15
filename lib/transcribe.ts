@@ -23,8 +23,10 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { after } from "next/server";
 import { openai, WHISPER_MODEL } from "@/lib/openai";
 import { uploadDir } from "@/lib/upload-id";
+import { analyzeUpload } from "@/lib/analyze";
 import { SIZE_LIMIT_ERROR_MESSAGE } from "@/lib/transcribe-constants";
 
 const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
@@ -131,6 +133,20 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
     metadata.status = "transcribed";
     metadata.transcribed_at = nowIso();
     writeMetadata(metadataPath, metadata);
+
+    // Chain to analysis. Fire-and-forget via after() so we don't block
+    // the rest of this after() callback's completion. analyzeUpload
+    // never throws; the .catch is belt-and-suspenders.
+    after(async () => {
+      try {
+        await analyzeUpload(uploadId);
+      } catch (analyzeErr) {
+        console.error(
+          `[transcribe] Background analyze threw for ${uploadId}:`,
+          analyzeErr,
+        );
+      }
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(

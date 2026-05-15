@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Link from "next/link";
-import { uploadDir } from "@/lib/upload-id";
+import { resolveUploadDir } from "@/lib/upload-id";
 import StatusView, { type Metadata } from "./status-view";
 
 export default async function StatusPage({
@@ -11,9 +11,10 @@ export default async function StatusPage({
 }) {
   const { upload_id } = await params;
 
-  const metadataPath = path.join(uploadDir(upload_id), "metadata.json");
+  const dir = resolveUploadDir(upload_id);
+  const metadataPath = dir ? path.join(dir, "metadata.json") : null;
 
-  if (!fs.existsSync(metadataPath)) {
+  if (!metadataPath || !fs.existsSync(metadataPath)) {
     return (
       <main className="mx-auto max-w-md p-4 space-y-4">
         <h1 className="text-xl font-semibold">Upload not found</h1>

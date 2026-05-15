@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { uploadDir } from "@/lib/upload-id";
+import { resolveUploadDir } from "@/lib/upload-id";
 
 export const runtime = "nodejs";
 
@@ -9,7 +9,16 @@ export async function GET(
   ctx: { params: Promise<{ upload_id: string }> },
 ) {
   const { upload_id } = await ctx.params;
-  const metadataPath = path.join(uploadDir(upload_id), "metadata.json");
+  const dir = resolveUploadDir(upload_id);
+
+  if (!dir) {
+    return Response.json(
+      { error: `Upload not found: ${upload_id}` },
+      { status: 404 },
+    );
+  }
+
+  const metadataPath = path.join(dir, "metadata.json");
 
   if (!fs.existsSync(metadataPath)) {
     return Response.json(

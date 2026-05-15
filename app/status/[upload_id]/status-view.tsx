@@ -16,6 +16,8 @@ export type Metadata = {
   uploaded_at: string;
   status: string;
   transcribed_at?: string;
+  analyzed_at?: string;
+  json_parse_error?: string;
   error_message?: string;
   error_at?: string;
 };
@@ -23,9 +25,13 @@ export type Metadata = {
 const STATUS_LABEL: Record<string, string> = {
   uploaded: "Uploaded — preparing for transcription",
   transcribing: "Transcribing audio (this can take a few minutes)",
-  transcribed: "Transcript ready — analyzer not yet wired up",
+  transcribed: "Transcript ready — queued for analysis",
+  analyzing: "Analyzing call against your sales methodology",
+  analyzed: "Analysis complete",
   error_transcription:
     "Transcription failed. Check error_message in metadata for details",
+  error_analysis:
+    "Analysis failed. Check error_message for details",
 };
 
 const OVERSIZE_USER_MESSAGE =
@@ -159,6 +165,22 @@ export default function StatusView({ initial }: { initial: Metadata }) {
             {metadata.error_message}
           </pre>
         )}
+        {metadata.status === "analyzed" && (
+          <div className="mt-3">
+            <Link
+              href={`/analysis/${encodeURIComponent(metadata.upload_id)}`}
+              className="inline-block px-4 py-2 border rounded-lg text-sm font-medium underline"
+            >
+              View analysis →
+            </Link>
+            {metadata.json_parse_error && (
+              <p className="text-xs mt-2 text-amber-700 dark:text-amber-400">
+                Note: analyzer output was malformed — coaching message
+                captured, JSON saved as parse-error record.
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {connectionLost && (
@@ -191,6 +213,12 @@ export default function StatusView({ initial }: { initial: Metadata }) {
           <Row
             label="Transcribed at"
             value={new Date(metadata.transcribed_at).toLocaleString()}
+          />
+        )}
+        {metadata.analyzed_at && (
+          <Row
+            label="Analyzed at"
+            value={new Date(metadata.analyzed_at).toLocaleString()}
           />
         )}
         {metadata.error_at && (

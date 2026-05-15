@@ -1,9 +1,26 @@
-import { APIError } from "@anthropic-ai/sdk";
-import { anthropic, MODEL } from "@/lib/anthropic";
-import { loadSkill } from "@/lib/skill-loader";
+/**
+ * Manual analyzer re-trigger.
+ *
+ * POST /api/analyze with body { upload_id: string } fires analyzeUpload
+ * for that id in the background and returns 202 immediately. Use this
+ * to re-run analysis after rubric tweaks or when debugging.
+ *
+ * Caveats:
+ *   - The upload must currently have status="transcribed". analyzeUpload
+ *     will refuse to run on any other status and log a warning.
+ *   - To re-run an already-analyzed upload, set its metadata.status back
+ *     to "transcribed" first. (Intentionally manual — this is a
+ *     debugging tool, not a normal pipeline path.)
+ */
+import { after } from "next/server";
+import fs from "node:fs";
+import { analyzeUpload } from "@/lib/analyze";
+import { resolveUploadDir } from "@/lib/upload-id";
+
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  let body: { transcript_id?: string; transcript?: string };
+  let body: { upload_id?: string };
   try {
     body = await request.json();
   } catch {
@@ -13,63 +30,35 @@ export async function POST(request: Request) {
     );
   }
 
-  const { transcript_id, transcript } = body;
-  if (!transcript_id || !transcript) {
+  const uploadId = body.upload_id?.trim();
+  if (!uploadId) {
     return Response.json(
-      { error: "transcript_id and transcript are required" },
+      { error: "upload_id is required" },
       { status: 400 },
     );
   }
 
-  let skill: string;
-  try {
-    skill = loadSkill();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+  const dir = resolveUploadDir(uploadId);
+  if (!dir || !fs.existsSync(dir)) {
     return Response.json(
-      { error: `Skill load failed: ${message}` },
-      { status: 500 },
+      { error: `Upload not found: ${uploadId}` },
+      { status: 404 },
     );
   }
 
-  const systemPrompt = [
-    "You are the FC Sales call analyzer. Use the methodology, rubric, and schema below to analyze the sales call transcript that the user provides. Follow the schema in your output.",
-    "",
-    skill,
-  ].join("\n");
-
-  const userMessage = [
-    `transcript_id: ${transcript_id}`,
-    "",
-    "TRANSCRIPT:",
-    transcript,
-  ].join("\n");
-
-  try {
-    const response = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-    });
-
-    const text = response.content
-      .flatMap((block) => (block.type === "text" ? [block.text] : []))
-      .join("\n");
-
-    return Response.json({ text, usage: response.usage });
-  } catch (err) {
-    if (err instanceof APIError) {
-      const status = err.status ?? 500;
-      return Response.json(
-        { error: `Anthropic API ${status}: ${err.message}` },
-        { status },
+  after(async () => {
+    try {
+      await analyzeUpload(uploadId);
+    } catch (err) {
+      console.error(
+        `[analyze:re-trigger] Background analyze threw for ${uploadId}:`,
+        err,
       );
     }
-    const message = err instanceof Error ? err.message : String(err);
-    return Response.json(
-      { error: `Unexpected error: ${message}` },
-      { status: 500 },
-    );
-  }
+  });
+
+  return Response.json(
+    { upload_id: uploadId, queued: true },
+    { status: 202 },
+  );
 }

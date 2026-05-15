@@ -37,8 +37,32 @@ export function getIncomingRoot(): string {
   return path.join(skillPath, "transcripts", "incoming");
 }
 
+export function getProcessedRoot(): string {
+  const skillPath = process.env.SKILL_PATH;
+  if (!skillPath) {
+    throw new Error("SKILL_PATH is not set");
+  }
+  return path.join(skillPath, "transcripts", "processed");
+}
+
 export function uploadDir(uploadId: string): string {
   return path.join(getIncomingRoot(), uploadId);
+}
+
+export function processedDir(uploadId: string): string {
+  return path.join(getProcessedRoot(), uploadId);
+}
+
+// Finds the upload folder in either incoming/ or processed/. Returns
+// null if neither exists. Used by status reads and the analyzer
+// re-trigger route so callers don't need to know where a given upload
+// currently lives in the pipeline.
+export function resolveUploadDir(uploadId: string): string | null {
+  const incoming = uploadDir(uploadId);
+  if (fs.existsSync(incoming)) return incoming;
+  const processed = processedDir(uploadId);
+  if (fs.existsSync(processed)) return processed;
+  return null;
 }
 
 export function generateUniqueUploadId(opts: {
