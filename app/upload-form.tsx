@@ -2,35 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { OUTCOME_GROUPS } from "@/lib/outcomes";
 
 type Props = {
   reps: string[];
   gyms: string[];
 };
-
-const OUTCOME_GROUPS: Array<{ label: string; values: string[] }> = [
-  {
-    label: "SOLD",
-    values: [
-      "sold-1x",
-      "sold-2x",
-      "sold-3x",
-      "sold-4x",
-      "transformation-challenge",
-    ],
-  },
-  {
-    label: "NOT SOLD",
-    values: [
-      "not-sold-think-about-it",
-      "not-sold-too-expensive",
-      "not-sold-decision-maker",
-      "not-sold-procrastination",
-      "not-sold-not-interested",
-      "not-sold-commitment",
-    ],
-  },
-];
 
 const MAX_BYTES = 100 * 1024 * 1024;
 const ALLOWED_EXT = ["mp3", "m4a", "wav", "ogg", "aac", "flac"];

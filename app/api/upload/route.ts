@@ -11,24 +11,11 @@ import {
   ALLOWED_AUDIO_EXTENSIONS,
 } from "@/lib/upload-id";
 import { transcribeUpload } from "@/lib/transcribe";
+import { ALLOWED_OUTCOMES } from "@/lib/outcomes";
 
 export const runtime = "nodejs";
 
 const MAX_BYTES = 100 * 1024 * 1024;
-
-const ALLOWED_OUTCOMES = new Set<string>([
-  "sold-1x",
-  "sold-2x",
-  "sold-3x",
-  "sold-4x",
-  "transformation-challenge",
-  "not-sold-think-about-it",
-  "not-sold-too-expensive",
-  "not-sold-decision-maker",
-  "not-sold-procrastination",
-  "not-sold-not-interested",
-  "not-sold-commitment",
-]);
 
 const REQUIRED_FIELDS = [
   "rep",
