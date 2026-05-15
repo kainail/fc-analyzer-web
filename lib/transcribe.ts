@@ -57,6 +57,7 @@ import {
 } from "@/lib/audio-chunker";
 
 const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
+const WHISPER_TIMEOUT_MS = 5 * 60 * 1000;
 
 type Metadata = Record<string, unknown> & {
   upload_id: string;
@@ -194,12 +195,37 @@ function removeChunksDir(chunksDir: string, uploadId: string): void {
 async function transcribeFile(
   audioPath: string,
 ): Promise<TranscriptionVerbose> {
-  return openai.audio.transcriptions.create({
-    model: WHISPER_MODEL,
-    file: fs.createReadStream(audioPath),
-    response_format: "verbose_json",
-    timestamp_granularities: ["segment"],
-  });
+  // AbortController enforces a hard total cap on the Whisper call,
+  // including retries — unlike RequestOptions.timeout which applies
+  // per-attempt and would allow ~3x the configured time across the
+  // SDK's default retry chain. An aborted call surfaces as a clear
+  // timeout error rather than hanging indefinitely.
+  const controller = new AbortController();
+  let aborted = false;
+  const timer = setTimeout(() => {
+    aborted = true;
+    controller.abort();
+  }, WHISPER_TIMEOUT_MS);
+  try {
+    return await openai.audio.transcriptions.create(
+      {
+        model: WHISPER_MODEL,
+        file: fs.createReadStream(audioPath),
+        response_format: "verbose_json",
+        timestamp_granularities: ["segment"],
+      },
+      { signal: controller.signal },
+    );
+  } catch (err) {
+    if (aborted) {
+      throw new Error(
+        `Whisper API call exceeded ${WHISPER_TIMEOUT_MS}ms timeout`,
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function transcribeUpload(uploadId: string): Promise<void> {
@@ -309,10 +335,13 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
     writeMetadata(metadataPath, metadata);
     console.log(`[transcribe] ${uploadId}: done — status=transcribed`);
 
-    // Chain to analysis. Fire-and-forget via after() so we don't block
-    // the rest of this after() callback's completion. analyzeUpload
+    // Chain to analysis. Fire-and-forget via after() when called from
+    // a request scope; fall back to setImmediate when there's no
+    // request (e.g., the startup-recovery sweep, which calls
+    // transcribeUpload directly from instrumentation.ts and so has no
+    // response lifecycle for after() to hang off of). analyzeUpload
     // never throws; the .catch is belt-and-suspenders.
-    after(async () => {
+    const runAnalyze = async () => {
       try {
         await analyzeUpload(uploadId);
       } catch (analyzeErr) {
@@ -321,7 +350,13 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
           analyzeErr,
         );
       }
-    });
+    };
+    try {
+      after(runAnalyze);
+    } catch {
+      // No request scope — schedule directly so the chain still runs.
+      setImmediate(runAnalyze);
+    }
   } catch (err) {
     const { name, message, stack } = describeError(err);
     console.error(
