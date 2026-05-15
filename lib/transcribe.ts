@@ -25,14 +25,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { openai, WHISPER_MODEL } from "@/lib/openai";
 import { uploadDir } from "@/lib/upload-id";
+import { SIZE_LIMIT_ERROR_MESSAGE } from "@/lib/transcribe-constants";
 
 const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
-
-// Marker substring used by the status page to detect the size-limit
-// error and render a user-friendly message. Keep in sync if the text
-// here changes.
-export const SIZE_LIMIT_ERROR_MESSAGE =
-  "File exceeds Whisper 25MB limit — chunking not yet implemented.";
 
 type Metadata = Record<string, unknown> & {
   upload_id: string;
