@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, JetBrains_Mono } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import Sidebar from "./sidebar";
 import Topbar from "./topbar";
@@ -37,20 +38,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      data-theme="dark"
-      className={`${dmSans.variable} ${jetbrainsMono.variable}`}
-    >
-      <body>
-        <div className="app">
-          <Sidebar />
-          <div className="main main-ambient">
-            <Topbar />
-            {children}
+    <ClerkProvider>
+      <html
+        lang="en"
+        data-theme="dark"
+        className={`${dmSans.variable} ${jetbrainsMono.variable}`}
+      >
+        <body>
+          <div className="app">
+            <Sidebar />
+            <div className="main main-ambient">
+              <Topbar />
+              {children}
+            </div>
           </div>
-        </div>
-      </body>
-    </html>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
