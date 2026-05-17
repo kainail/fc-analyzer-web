@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 import { OUTCOME_GROUPS } from "@/lib/outcomes";
+import { Search } from "@/lib/icons";
 
 type Props = {
   reps: string[];
@@ -12,6 +13,7 @@ type Props = {
     from: string | null;
     to: string | null;
     sort: string;
+    query: string;
   };
 };
 
@@ -25,6 +27,7 @@ export default function DashboardFilters({ reps, initial }: Props) {
   const [from, setFrom] = useState<string>(initial.from ?? "");
   const [to, setTo] = useState<string>(initial.to ?? "");
   const [sort, setSort] = useState<string>(initial.sort);
+  const [query, setQuery] = useState<string>(initial.query);
 
   function pushUrl(next: {
     outcomes: string[];
@@ -32,6 +35,7 @@ export default function DashboardFilters({ reps, initial }: Props) {
     from: string;
     to: string;
     sort: string;
+    query: string;
   }) {
     const params = new URLSearchParams(searchParams.toString());
     if (next.outcomes.length) params.set("outcome", next.outcomes.join(","));
@@ -44,6 +48,8 @@ export default function DashboardFilters({ reps, initial }: Props) {
     else params.delete("to");
     if (next.sort && next.sort !== "analyzed_desc") params.set("sort", next.sort);
     else params.delete("sort");
+    if (next.query.trim()) params.set("q", next.query.trim());
+    else params.delete("q");
     const qs = params.toString();
     startTransition(() => {
       router.push(qs ? `/dashboard?${qs}` : "/dashboard");
@@ -55,27 +61,17 @@ export default function DashboardFilters({ reps, initial }: Props) {
       ? outcomes.filter((v) => v !== value)
       : [...outcomes, value];
     setOutcomes(next);
-    pushUrl({ outcomes: next, rep, from, to, sort });
+    pushUrl({ outcomes: next, rep, from, to, sort, query });
   }
 
-  function onRepChange(value: string) {
-    setRep(value);
-    pushUrl({ outcomes, rep: value, from, to, sort });
-  }
-
-  function onFromChange(value: string) {
-    setFrom(value);
-    pushUrl({ outcomes, rep, from: value, to, sort });
-  }
-
-  function onToChange(value: string) {
-    setTo(value);
-    pushUrl({ outcomes, rep, from, to: value, sort });
-  }
-
-  function onSortChange(value: string) {
-    setSort(value);
-    pushUrl({ outcomes, rep, from, to, sort: value });
+  function selectGroup(values: readonly string[]) {
+    // Toggle: if every option in this group is already selected, clear them.
+    const allOn = values.every((v) => outcomes.includes(v));
+    const next = allOn
+      ? outcomes.filter((v) => !values.includes(v))
+      : Array.from(new Set([...outcomes, ...values]));
+    setOutcomes(next);
+    pushUrl({ outcomes: next, rep, from, to, sort, query });
   }
 
   function clearAll() {
@@ -84,126 +80,303 @@ export default function DashboardFilters({ reps, initial }: Props) {
     setFrom("");
     setTo("");
     setSort("analyzed_desc");
+    setQuery("");
     startTransition(() => router.push("/dashboard"));
   }
 
   const hasFilters =
-    outcomes.length > 0 || rep || from || to || sort !== "analyzed_desc";
+    outcomes.length > 0 ||
+    rep ||
+    from ||
+    to ||
+    sort !== "analyzed_desc" ||
+    query.trim();
 
-  const inputCls =
-    "block w-full text-sm rounded-md border border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-1.5";
-  const labelCls = "text-xs uppercase tracking-wide text-zinc-500 font-medium";
+  const soldValues = OUTCOME_GROUPS[0].values;
+  const notSoldValues = OUTCOME_GROUPS[1].values;
+  const allSoldOn = soldValues.every((v) => outcomes.includes(v));
+  const allNotSoldOn = notSoldValues.every((v) => outcomes.includes(v));
+
+  function chipStyle(active: boolean, tone?: "sold" | "notsold"): React.CSSProperties {
+    if (active) {
+      const bg =
+        tone === "sold"
+          ? "var(--sold-bg)"
+          : tone === "notsold"
+            ? "var(--notsold-bg)"
+            : "var(--primary-50)";
+      const fg =
+        tone === "sold"
+          ? "var(--sold)"
+          : tone === "notsold"
+            ? "var(--notsold)"
+            : "var(--primary)";
+      return {
+        background: bg,
+        color: fg,
+      };
+    }
+    return { background: "transparent", color: "var(--ink-2)" };
+  }
 
   return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">Filters</h2>
-        <div className="flex items-center gap-3">
+    <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        {/* Outcome chips: ALL + group toggles + group expansions */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => {
+              setOutcomes([]);
+              pushUrl({ outcomes: [], rep, from, to, sort, query });
+            }}
+            style={{
+              border: 0,
+              padding: "5px 10px",
+              borderRadius: 7,
+              fontSize: 12.5,
+              fontWeight: 500,
+              cursor: "pointer",
+              transition: "background 80ms",
+              ...chipStyle(outcomes.length === 0),
+            }}
+          >
+            All
+          </button>
+
+          <button
+            type="button"
+            onClick={() => selectGroup(soldValues)}
+            style={{
+              border: 0,
+              padding: "5px 10px",
+              borderRadius: 7,
+              fontSize: 12.5,
+              fontWeight: 500,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              ...chipStyle(allSoldOn, "sold"),
+            }}
+          >
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 999,
+                background: "var(--sold)",
+                display: "inline-block",
+              }}
+            />
+            SOLD
+          </button>
+
+          <div style={{ display: "inline-flex", gap: 4 }}>
+            {soldValues.map((v) => {
+              const on = outcomes.includes(v);
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => toggleOutcome(v)}
+                  style={{
+                    border: on
+                      ? "1px solid var(--sold)"
+                      : "1px solid var(--border)",
+                    padding: "3px 8px",
+                    borderRadius: 999,
+                    fontSize: 11.5,
+                    background: on ? "var(--sold-bg)" : "var(--surface)",
+                    color: on ? "var(--sold)" : "var(--ink-3)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {v}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => selectGroup(notSoldValues)}
+            style={{
+              border: 0,
+              padding: "5px 10px",
+              borderRadius: 7,
+              fontSize: 12.5,
+              fontWeight: 500,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              ...chipStyle(allNotSoldOn, "notsold"),
+            }}
+          >
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 999,
+                background: "var(--notsold)",
+                display: "inline-block",
+              }}
+            />
+            NOT SOLD
+          </button>
+
+          <div style={{ display: "inline-flex", gap: 4 }}>
+            {notSoldValues.map((v) => {
+              const on = outcomes.includes(v);
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => toggleOutcome(v)}
+                  style={{
+                    border: on
+                      ? "1px solid var(--notsold)"
+                      : "1px solid var(--border)",
+                    padding: "3px 8px",
+                    borderRadius: 999,
+                    fontSize: 11.5,
+                    background: on ? "var(--notsold-bg)" : "var(--surface)",
+                    color: on ? "var(--notsold)" : "var(--ink-3)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {v}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div
+          style={{
+            width: 1,
+            height: 22,
+            background: "var(--border)",
+            margin: "0 4px",
+          }}
+        />
+
+        <select
+          className="select"
+          style={{ height: 30, fontSize: 12.5, width: "auto", minWidth: 140 }}
+          value={rep}
+          onChange={(e) => {
+            const next = e.target.value;
+            setRep(next);
+            pushUrl({ outcomes, rep: next, from, to, sort, query });
+          }}
+        >
+          <option value="">All reps</option>
+          {reps.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+
+        <input
+          type="date"
+          className="input"
+          style={{ height: 30, fontSize: 12.5, width: "auto" }}
+          value={from}
+          onChange={(e) => {
+            const next = e.target.value;
+            setFrom(next);
+            pushUrl({ outcomes, rep, from: next, to, sort, query });
+          }}
+          aria-label="From date"
+        />
+        <input
+          type="date"
+          className="input"
+          style={{ height: 30, fontSize: 12.5, width: "auto" }}
+          value={to}
+          onChange={(e) => {
+            const next = e.target.value;
+            setTo(next);
+            pushUrl({ outcomes, rep, from, to: next, sort, query });
+          }}
+          aria-label="To date"
+        />
+
+        <div style={{ flex: 1, minWidth: 200, position: "relative" }}>
+          <Search
+            size={14}
+            style={{
+              position: "absolute",
+              left: 10,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "var(--ink-4)",
+            }}
+          />
+          <input
+            className="input"
+            style={{ height: 30, fontSize: 12.5, paddingLeft: 32 }}
+            placeholder="Search prospect, rep, drill focus…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                pushUrl({ outcomes, rep, from, to, sort, query });
+              }
+            }}
+            onBlur={() => pushUrl({ outcomes, rep, from, to, sort, query })}
+          />
+        </div>
+
+        <select
+          className="select"
+          style={{ height: 30, fontSize: 12.5, width: "auto" }}
+          value={sort}
+          onChange={(e) => {
+            const next = e.target.value;
+            setSort(next);
+            pushUrl({ outcomes, rep, from, to, sort: next, query });
+          }}
+        >
+          <option value="analyzed_desc">Most recent</option>
+          <option value="consultation_desc">Newest consultation</option>
+          <option value="score_asc">Score: low → high</option>
+          <option value="score_desc">Score: high → low</option>
+        </select>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginLeft: "auto",
+          }}
+        >
           {pending && (
-            <span className="text-xs text-zinc-500">Updating…</span>
+            <span className="mono faint" style={{ fontSize: 11 }}>
+              Updating…
+            </span>
           )}
           {hasFilters && (
             <button
               type="button"
               onClick={clearAll}
-              className="text-xs underline text-zinc-600 dark:text-zinc-400"
+              className="btn btn-ghost btn-sm"
             >
               Clear all
             </button>
           )}
-        </div>
-      </div>
-
-      <div>
-        <div className={labelCls + " mb-2"}>Outcome</div>
-        <div className="space-y-2">
-          {OUTCOME_GROUPS.map((g) => (
-            <div key={g.label}>
-              <div className="text-[11px] text-zinc-500 font-mono mb-1">
-                {g.label}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {g.values.map((v) => {
-                  const active = outcomes.includes(v);
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => toggleOutcome(v)}
-                      className={
-                        "text-xs px-2 py-1 rounded-full border " +
-                        (active
-                          ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100"
-                          : "border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-900")
-                      }
-                    >
-                      {v}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className={labelCls} htmlFor="rep-filter">
-            Rep
-          </label>
-          <select
-            id="rep-filter"
-            className={inputCls + " mt-1"}
-            value={rep}
-            onChange={(e) => onRepChange(e.target.value)}
-          >
-            <option value="">All reps</option>
-            {reps.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className={labelCls} htmlFor="sort-filter">
-            Sort
-          </label>
-          <select
-            id="sort-filter"
-            className={inputCls + " mt-1"}
-            value={sort}
-            onChange={(e) => onSortChange(e.target.value)}
-          >
-            <option value="analyzed_desc">Newest analyzed first</option>
-            <option value="consultation_desc">Newest consultation first</option>
-            <option value="score_asc">Lowest score first</option>
-          </select>
-        </div>
-        <div>
-          <label className={labelCls} htmlFor="from-filter">
-            Consultation date from
-          </label>
-          <input
-            id="from-filter"
-            type="date"
-            className={inputCls + " mt-1"}
-            value={from}
-            onChange={(e) => onFromChange(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className={labelCls} htmlFor="to-filter">
-            to
-          </label>
-          <input
-            id="to-filter"
-            type="date"
-            className={inputCls + " mt-1"}
-            value={to}
-            onChange={(e) => onToChange(e.target.value)}
-          />
         </div>
       </div>
     </div>

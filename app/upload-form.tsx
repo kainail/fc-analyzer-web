@@ -1,8 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { OUTCOME_GROUPS } from "@/lib/outcomes";
+import { fmtFileSize } from "@/lib/format";
+import {
+  CheckCirc,
+  Clock,
+  Doc,
+  Help,
+  Mic,
+  Upload as UploadIcon,
+  X,
+} from "@/lib/icons";
 
 type Props = {
   reps: string[];
@@ -11,12 +21,6 @@ type Props = {
 
 const MAX_BYTES = 100 * 1024 * 1024;
 const ALLOWED_EXT = ["mp3", "m4a", "wav", "ogg", "aac", "flac"];
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
 
 function todayIso(): string {
   const d = new Date();
@@ -38,32 +42,40 @@ export default function UploadForm({ reps, gyms }: Props) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [drag, setDrag] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0] ?? null;
+  function acceptFile(f: File | null): boolean {
     if (!f) {
       setFile(null);
-      return;
+      return false;
     }
     const ext = f.name.split(".").pop()?.toLowerCase();
     if (!ext || !ALLOWED_EXT.includes(ext)) {
-      setError(
-        `Audio must be one of: ${ALLOWED_EXT.join(", ")} (got "${f.name}")`,
-      );
+      setError(`Audio must be one of: ${ALLOWED_EXT.join(", ")} (got "${f.name}")`);
       setFile(null);
-      e.target.value = "";
-      return;
+      return false;
     }
     if (f.size > MAX_BYTES) {
-      setError(
-        `File too large: ${formatBytes(f.size)} exceeds the 100 MB limit`,
-      );
+      setError(`File too large: ${fmtFileSize(f.size)} exceeds the 100 MB limit`);
       setFile(null);
-      e.target.value = "";
-      return;
+      return false;
     }
     setError(null);
     setFile(f);
+    return true;
+  }
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null;
+    if (!acceptFile(f)) e.target.value = "";
+  }
+
+  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDrag(false);
+    const f = e.dataTransfer.files?.[0] ?? null;
+    acceptFile(f);
   }
 
   function firstMissing(): string | null {
@@ -137,159 +149,335 @@ export default function UploadForm({ reps, gyms }: Props) {
     xhr.send(fd);
   }
 
-  const inputCls =
-    "w-full border rounded-lg px-3 py-3 text-base bg-white dark:bg-zinc-900";
-  const labelCls = "block text-sm font-medium mb-1";
+  const valid = !firstMissing();
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div>
-        <label className={labelCls} htmlFor="rep">
-          Rep
-        </label>
-        <select
-          id="rep"
-          className={inputCls}
-          value={rep}
-          onChange={(e) => setRep(e.target.value)}
-          disabled={uploading}
+    <form onSubmit={onSubmit}>
+      <div className="card card-pad-lg">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 16,
+          }}
         >
-          <option value="">Select rep…</option>
-          {reps.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label className={labelCls} htmlFor="gym">
-          Gym
-        </label>
-        <select
-          id="gym"
-          className={inputCls}
-          value={gym}
-          onChange={(e) => setGym(e.target.value)}
-          disabled={uploading}
-        >
-          {gyms.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label className={labelCls} htmlFor="prospect">
-          Prospect name
-        </label>
-        <input
-          id="prospect"
-          type="text"
-          className={inputCls}
-          value={prospect}
-          onChange={(e) => setProspect(e.target.value)}
-          autoComplete="off"
-          autoCapitalize="words"
-          disabled={uploading}
-        />
-      </div>
-
-      <div>
-        <label className={labelCls} htmlFor="consultation_date">
-          Consultation date
-        </label>
-        <input
-          id="consultation_date"
-          type="date"
-          className={inputCls}
-          value={consultationDate}
-          onChange={(e) => setConsultationDate(e.target.value)}
-          disabled={uploading}
-        />
-      </div>
-
-      <div>
-        <label className={labelCls} htmlFor="outcome">
-          Outcome
-        </label>
-        <select
-          id="outcome"
-          className={inputCls}
-          value={outcome}
-          onChange={(e) => setOutcome(e.target.value)}
-          disabled={uploading}
-        >
-          <option value="">Select outcome…</option>
-          {OUTCOME_GROUPS.map((g) => (
-            <optgroup key={g.label} label={g.label}>
-              {g.values.map((v) => (
-                <option key={v} value={v}>
-                  {v}
+          <div className="field">
+            <label className="label" htmlFor="rep">
+              Rep <span className="req">*</span>
+            </label>
+            <select
+              id="rep"
+              className="select"
+              value={rep}
+              onChange={(e) => setRep(e.target.value)}
+              disabled={uploading}
+            >
+              <option value="" disabled>
+                Select rep…
+              </option>
+              {reps.map((r) => (
+                <option key={r} value={r}>
+                  {r}
                 </option>
               ))}
-            </optgroup>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label className={labelCls} htmlFor="audio">
-          Audio recording
-        </label>
-        <input
-          id="audio"
-          type="file"
-          accept=".mp3,.m4a,.wav,.ogg,.aac,.flac,audio/*"
-          onChange={onFileChange}
-          className="block w-full text-sm py-2"
-          disabled={uploading}
-        />
-        {file && (
-          <div className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
-            Selected:{" "}
-            <span className="font-mono break-all">{file.name}</span> (
-            {formatBytes(file.size)})
+            </select>
           </div>
-        )}
-      </div>
 
-      {uploading && (
-        <div className="space-y-1">
-          <div className="text-sm">Uploading… {progress}%</div>
-          <div className="w-full h-3 bg-zinc-200 dark:bg-zinc-800 rounded overflow-hidden">
-            <div
-              className="h-3 bg-blue-600 transition-all"
-              style={{ width: `${progress}%` }}
+          <div className="field">
+            <label className="label" htmlFor="gym">
+              Gym <span className="req">*</span>
+            </label>
+            <select
+              id="gym"
+              className="select"
+              value={gym}
+              onChange={(e) => setGym(e.target.value)}
+              disabled={uploading}
+            >
+              <option value="" disabled>
+                Select gym…
+              </option>
+              {gyms.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <label className="label" htmlFor="prospect">
+              Prospect name <span className="req">*</span>
+            </label>
+            <input
+              id="prospect"
+              type="text"
+              className="input"
+              placeholder="e.g. Aisha Brennan"
+              value={prospect}
+              onChange={(e) => setProspect(e.target.value)}
+              autoComplete="off"
+              autoCapitalize="words"
+              disabled={uploading}
             />
           </div>
-        </div>
-      )}
 
-      {error && (
-        <div
-          role="alert"
-          className="border-2 border-red-500 bg-red-50 dark:bg-red-950/30 rounded-lg p-4"
-        >
-          <div className="font-semibold text-red-700 dark:text-red-300">
-            Error
+          <div className="field">
+            <label className="label" htmlFor="consultation_date">
+              Consultation date <span className="req">*</span>
+            </label>
+            <input
+              id="consultation_date"
+              type="date"
+              className="input"
+              value={consultationDate}
+              onChange={(e) => setConsultationDate(e.target.value)}
+              max={todayIso()}
+              disabled={uploading}
+            />
           </div>
-          <pre className="whitespace-pre-wrap text-sm text-red-900 dark:text-red-200">
-            {error}
-          </pre>
-        </div>
-      )}
 
-      <button
-        type="submit"
-        disabled={uploading}
-        className="w-full px-4 py-4 bg-blue-600 text-white text-base font-semibold rounded-lg disabled:opacity-50 active:bg-blue-700"
+          <div className="field">
+            <label className="label" htmlFor="outcome">
+              Outcome <span className="req">*</span>
+            </label>
+            <select
+              id="outcome"
+              className="select"
+              value={outcome}
+              onChange={(e) => setOutcome(e.target.value)}
+              disabled={uploading}
+            >
+              <option value="" disabled>
+                Select outcome…
+              </option>
+              {OUTCOME_GROUPS.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.values.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <label className="label">
+              Audio file <span className="req">*</span>
+              <span className="hint">
+                .mp3 · .m4a · .wav · .ogg · .aac · .flac — up to 100 MB
+              </span>
+            </label>
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (!uploading) setDrag(true);
+              }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={(e) => {
+                if (uploading) return;
+                onDrop(e);
+              }}
+              onClick={() => {
+                if (!uploading) fileRef.current?.click();
+              }}
+              style={{
+                border: `1.5px dashed ${drag ? "var(--primary)" : "var(--border-strong)"}`,
+                background: drag
+                  ? "var(--primary-50)"
+                  : "var(--surface-2)",
+                borderRadius: "var(--r-md)",
+                padding: 24,
+                display: "flex",
+                alignItems: "center",
+                gap: 16,
+                cursor: uploading ? "not-allowed" : "pointer",
+                transition: "background 100ms, border-color 100ms",
+                opacity: uploading ? 0.7 : 1,
+              }}
+            >
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 10,
+                  background: file ? "var(--score-green-bg)" : "var(--primary-50)",
+                  color: file ? "var(--score-green)" : "var(--primary)",
+                  display: "grid",
+                  placeItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {file ? <CheckCirc size={22} /> : <Mic size={22} />}
+              </div>
+              {file ? (
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{
+                      fontWeight: 500,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {file.name}
+                  </div>
+                  <div className="muted mono" style={{ fontSize: 12 }}>
+                    {fmtFileSize(file.size)} · ready to upload
+                  </div>
+                </div>
+              ) : (
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 500 }}>
+                    Drop audio file here, or click to browse
+                  </div>
+                  <div className="muted" style={{ fontSize: 12.5 }}>
+                    Whole consultation, from greeting through close
+                  </div>
+                </div>
+              )}
+              {file ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFile(null);
+                    if (fileRef.current) fileRef.current.value = "";
+                  }}
+                  disabled={uploading}
+                >
+                  <X size={14} /> Remove
+                </button>
+              ) : (
+                <span className="kbd">browse</span>
+              )}
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".mp3,.m4a,.wav,.ogg,.aac,.flac,audio/*"
+                hidden
+                onChange={onFileChange}
+                disabled={uploading}
+              />
+            </div>
+          </div>
+        </div>
+
+        {uploading && (
+          <div style={{ marginTop: 18 }}>
+            <div
+              className="mono"
+              style={{
+                fontSize: 12,
+                color: "var(--ink-3)",
+                marginBottom: 6,
+                display: "flex",
+                justifyContent: "space-between",
+              }}
+            >
+              <span>Uploading…</span>
+              <span>{progress}%</span>
+            </div>
+            <div
+              style={{
+                width: "100%",
+                height: 6,
+                background: "var(--surface-sunken)",
+                borderRadius: 999,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${progress}%`,
+                  background: "var(--primary)",
+                  transition: "width 120ms linear",
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            style={{
+              marginTop: 16,
+              padding: "10px 12px",
+              background: "var(--score-red-bg)",
+              color: "var(--score-red)",
+              borderRadius: 8,
+              fontSize: 12.5,
+              fontWeight: 500,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 22,
+            paddingTop: 18,
+            borderTop: "1px solid var(--divider)",
+          }}
+        >
+          <div
+            className="muted"
+            style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <Help size={14} /> Outcome is logged before analysis so the model
+            doesn&rsquo;t see it.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => router.push("/dashboard")}
+              disabled={uploading}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={!valid || uploading}
+            >
+              <UploadIcon size={15} /> {uploading ? "Uploading…" : "Upload & analyze"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: 28,
+          color: "var(--ink-3)",
+          fontSize: 12.5,
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          flexWrap: "wrap",
+        }}
       >
-        {uploading ? "Uploading…" : "Upload"}
-      </button>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Clock size={13} /> Typical turnaround: 3–5 min
+        </span>
+        <span
+          style={{ width: 1, height: 12, background: "var(--border-strong)" }}
+        />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Doc size={13} /> Files &gt; 25MB are auto-chunked via ffmpeg
+        </span>
+      </div>
     </form>
   );
 }

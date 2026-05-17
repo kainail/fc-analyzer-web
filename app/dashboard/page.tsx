@@ -7,7 +7,9 @@ import {
   applyFilters,
   type DashboardRow,
 } from "@/lib/dashboard-data";
-import { scoreColorClasses } from "@/lib/analysis-display";
+import { ALL_OUTCOMES } from "@/lib/outcomes";
+import { fmtDate, initials, scoreBand, bandClass } from "@/lib/format";
+import { ChevronR, Plus, TrendUp } from "@/lib/icons";
 import DashboardFilters from "./dashboard-filters";
 
 export const dynamic = "force-dynamic";
@@ -22,136 +24,235 @@ function loadReps(): string[] {
   }
 }
 
-function ScorePill({ score }: { score: number | null }) {
-  if (score === null) {
-    return (
-      <span className="inline-flex items-center justify-center px-2 py-0.5 rounded text-xs font-semibold bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 tabular-nums">
-        —
-      </span>
-    );
-  }
+function isSoldOutcome(outcome: string): boolean {
+  return outcome.startsWith("sold-") || outcome === "transformation-challenge";
+}
+
+function Stat({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  sub: string;
+  tone?: "good" | "warn" | "bad";
+}) {
+  const color =
+    tone === "good"
+      ? "var(--score-green)"
+      : tone === "warn"
+        ? "var(--score-amber)"
+        : tone === "bad"
+          ? "var(--score-red)"
+          : "var(--ink)";
   return (
-    <span
-      className={
-        "inline-flex items-center justify-center px-2 py-0.5 rounded text-sm font-semibold tabular-nums " +
-        scoreColorClasses(Math.round(score))
-      }
-    >
-      {score.toFixed(1)}
-    </span>
+    <div className="card grad-card card-pad">
+      <div style={{ position: "relative", zIndex: 1 }}>
+        <div
+          style={{
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: "0.06em",
+            color: "var(--ink-4)",
+            textTransform: "uppercase",
+          }}
+        >
+          {label}
+        </div>
+        <div
+          className="mono"
+          style={{
+            fontSize: 26,
+            fontWeight: 600,
+            color,
+            letterSpacing: "-0.02em",
+            marginTop: 4,
+          }}
+        >
+          {value}
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 1 }}>
+          {sub}
+        </div>
+      </div>
+    </div>
   );
 }
 
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1).trimEnd() + "…";
-}
-
 function Row({ row }: { row: DashboardRow }) {
+  const sold = isSoldOutcome(row.outcome);
+  const band = scoreBand(row.scores?.overall_score ?? null);
   const parseError = !!row.json_parse_error;
-  const bucketMismatch =
-    row.scores &&
-    row.scores.predicted_bucket &&
-    row.scores.predicted_bucket !== row.outcome;
 
   return (
     <Link
       href={`/analysis/${encodeURIComponent(row.upload_id)}`}
-      className="block border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 sm:p-4 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 transition-colors"
+      className="dash-row"
+      style={{
+        display: "grid",
+        gridTemplateColumns:
+          "1.5fr 1.0fr 0.7fr 1.1fr 1.1fr 0.7fr 0.6fr 1.6fr 28px",
+        gap: 12,
+        padding: "13px 20px",
+        borderBottom: "1px solid var(--divider)",
+        textAlign: "left",
+        alignItems: "center",
+        textDecoration: "none",
+        color: "inherit",
+      }}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-semibold text-sm sm:text-base truncate">
-              {row.prospect}
-            </h3>
-            <span className="text-xs text-zinc-500">with {row.rep}</span>
-          </div>
-          <div className="text-xs text-zinc-500 mt-0.5 flex flex-wrap gap-x-2 gap-y-1">
-            <span>{row.consultation_date}</span>
-            <span>·</span>
-            <span>{row.gym}</span>
-          </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 7,
+            background: "var(--surface-sunken)",
+            display: "grid",
+            placeItems: "center",
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            fontWeight: 600,
+            color: "var(--ink-3)",
+            flexShrink: 0,
+          }}
+        >
+          {initials(row.prospect)}
         </div>
-        <div className="shrink-0">
-          {row.scores ? (
-            <ScorePill score={row.scores.overall_score} />
-          ) : (
-            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
-              malformed
-            </span>
-          )}
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontWeight: 500,
+              fontSize: 13.5,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {row.prospect}
+          </div>
+          <div className="mono faint" style={{ fontSize: 11 }}>
+            {row.upload_id}
+          </div>
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300">
+      <div
+        style={{
+          fontSize: 13,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {row.rep}
+      </div>
+
+      <div className="mono" style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+        {fmtDate(row.consultation_date)}
+      </div>
+
+      <div
+        style={{
+          fontSize: 12.5,
+          color: "var(--ink-2)",
+          minWidth: 0,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {row.gym}
+      </div>
+
+      <div>
+        <span className={`chip ${sold ? "chip-sold" : "chip-notsold"}`}>
+          <span className="dot" />
           {row.outcome}
         </span>
-        {row.scores?.predicted_bucket && bucketMismatch && (
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        {row.scores?.overall_score != null ? (
+          <span className={`score-pill ${bandClass(band)}`}>
+            {row.scores.overall_score.toFixed(1)}
+          </span>
+        ) : parseError ? (
           <span
-            className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200"
-            title="Analyzer predicted a different outcome than the rep recorded"
+            className="chip"
+            style={{
+              background: "var(--score-amber-bg)",
+              color: "var(--score-amber)",
+            }}
           >
-            predicted: {row.scores.predicted_bucket}
+            malformed
           </span>
-        )}
-        {row.scores && row.scores.weak_stage_count > 0 && (
-          <span className="text-[11px] text-zinc-600 dark:text-zinc-400">
-            {row.scores.weak_stage_count} weak stage
-            {row.scores.weak_stage_count === 1 ? "" : "s"}
-          </span>
-        )}
-        {parseError && (
-          <span className="text-[11px] text-amber-700 dark:text-amber-400">
-            Output malformed — re-run available
+        ) : (
+          <span className="mono faint" style={{ fontSize: 12 }}>
+            —
           </span>
         )}
       </div>
 
-      {row.scores?.primary_focus_skill && (
-        <div className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mr-1.5">
-            Drill:
+      <div style={{ textAlign: "center" }}>
+        {row.scores?.weak_stage_count ? (
+          <span
+            className="mono"
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color:
+                row.scores.weak_stage_count >= 4
+                  ? "var(--score-red)"
+                  : row.scores.weak_stage_count >= 2
+                    ? "var(--score-amber)"
+                    : "var(--ink-2)",
+            }}
+          >
+            {row.scores.weak_stage_count}
           </span>
-          {truncate(row.scores.primary_focus_skill, 80)}
-        </div>
-      )}
-
-      {row.analyzed_at && (
-        <div className="mt-2 text-[11px] text-zinc-500">
-          Analyzed {new Date(row.analyzed_at).toLocaleString()}
-        </div>
-      )}
-    </Link>
-  );
-}
-
-function EmptyState({ filtered }: { filtered: boolean }) {
-  if (filtered) {
-    return (
-      <div className="border border-dashed border-zinc-300 dark:border-zinc-700 rounded-lg p-8 text-center space-y-2">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          No analyses match these filters.
-        </p>
-        <p className="text-xs text-zinc-500">
-          Try clearing some filters above.
-        </p>
+        ) : (
+          <span className="mono faint" style={{ fontSize: 12 }}>
+            —
+          </span>
+        )}
       </div>
-    );
-  }
-  return (
-    <div className="border border-dashed border-zinc-300 dark:border-zinc-700 rounded-lg p-8 text-center space-y-3">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        No analyses yet.
-      </p>
-      <Link
-        href="/"
-        className="inline-block px-4 py-2 border rounded-lg text-sm font-medium underline"
+
+      <div
+        style={{
+          fontSize: 12.5,
+          color: "var(--ink-2)",
+          minWidth: 0,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+        title={row.scores?.primary_focus_skill ?? ""}
       >
-        Upload a recording →
-      </Link>
-    </div>
+        {row.scores?.primary_focus_skill ?? (
+          <span className="faint">—</span>
+        )}
+      </div>
+
+      <div
+        style={{
+          color: "var(--ink-4)",
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
+        <ChevronR size={14} />
+      </div>
+    </Link>
   );
 }
 
@@ -166,23 +267,98 @@ export default async function DashboardPage({
   const rows = applyFilters(allRows, filters);
   const reps = loadReps();
 
+  // Stats computed from the FILTERED set (matches the design behavior).
+  const stats = (() => {
+    if (!rows.length) return null;
+    const sold = rows.filter((r) => isSoldOutcome(r.outcome)).length;
+    const numericScores = rows
+      .map((r) => r.scores?.overall_score)
+      .filter((s): s is number => typeof s === "number");
+    const avg =
+      numericScores.length > 0
+        ? numericScores.reduce((a, b) => a + b, 0) / numericScores.length
+        : null;
+    const weak = numericScores.filter((s) => s < 6).length;
+    return {
+      count: rows.length,
+      sold,
+      soldRate: sold / rows.length,
+      avg,
+      weak,
+    };
+  })();
+
+  // Outcome-filter description for the "consultations" stat subtitle
+  const outcomeSummary = filters.outcomes.length
+    ? filters.outcomes.length === ALL_OUTCOMES.length
+      ? "all outcomes"
+      : `${filters.outcomes.length} outcome filter${filters.outcomes.length === 1 ? "" : "s"}`
+    : filters.from || filters.to
+      ? "in date range"
+      : "all time";
+
   return (
-    <main className="mx-auto max-w-3xl p-4 space-y-5">
-      <header className="space-y-1">
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="text-2xl sm:text-3xl font-semibold">Dashboard</h1>
-          <Link href="/" className="text-sm underline">
-            ← Upload
+    <div className="content wide">
+      <div className="page-head">
+        <div>
+          <h2>Consultations</h2>
+          <div className="sub">
+            Analyzed recordings — click a row to open the coaching report.
+          </div>
+        </div>
+        <div className="page-head-actions">
+          <button type="button" className="btn btn-secondary" disabled>
+            <TrendUp size={14} /> Team report
+          </button>
+          <Link href="/" className="btn btn-primary">
+            <Plus size={15} /> New upload
           </Link>
         </div>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          {allRows.length === 0
-            ? "No completed analyses yet."
-            : rows.length === allRows.length
-              ? `${allRows.length} analysis${allRows.length === 1 ? "" : "es"}`
-              : `${rows.length} of ${allRows.length} analyses`}
-        </p>
-      </header>
+      </div>
+
+      {/* Stats row — only when there are rows to summarize */}
+      {stats && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: 12,
+            marginBottom: 18,
+          }}
+        >
+          <Stat
+            label="Consultations"
+            value={stats.count}
+            sub={outcomeSummary}
+          />
+          <Stat
+            label="Close rate"
+            value={`${Math.round(stats.soldRate * 100)}%`}
+            sub={`${stats.sold} of ${stats.count} sold`}
+            tone={stats.soldRate >= 0.5 ? "good" : "warn"}
+          />
+          <Stat
+            label="Avg score"
+            value={stats.avg != null ? stats.avg.toFixed(1) : "—"}
+            sub="out of 10"
+            tone={
+              stats.avg != null
+                ? stats.avg >= 7
+                  ? "good"
+                  : stats.avg >= 5
+                    ? "warn"
+                    : "bad"
+                : undefined
+            }
+          />
+          <Stat
+            label="Below 6"
+            value={stats.weak}
+            sub="needs drilling"
+            tone={stats.weak === 0 ? "good" : "warn"}
+          />
+        </div>
+      )}
 
       <DashboardFilters
         reps={reps}
@@ -192,16 +368,86 @@ export default async function DashboardPage({
           from: filters.from,
           to: filters.to,
           sort: filters.sort,
+          query: filters.query,
         }}
       />
 
-      <section className="space-y-2">
+      {/* Table */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "1.5fr 1.0fr 0.7fr 1.1fr 1.1fr 0.7fr 0.6fr 1.6fr 28px",
+            padding: "11px 20px",
+            background: "var(--surface-2)",
+            borderBottom: "1px solid var(--border)",
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: "var(--ink-4)",
+            gap: 12,
+          }}
+        >
+          <div>Prospect</div>
+          <div>Rep</div>
+          <div>Date</div>
+          <div>Gym</div>
+          <div>Outcome</div>
+          <div style={{ textAlign: "center" }}>Score</div>
+          <div style={{ textAlign: "center" }}>Weak</div>
+          <div>Drill focus</div>
+          <div />
+        </div>
+
         {rows.length === 0 ? (
-          <EmptyState filtered={allRows.length > 0} />
+          allRows.length === 0 ? (
+            <div style={{ padding: "60px 20px", textAlign: "center" }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 500,
+                  marginBottom: 4,
+                }}
+              >
+                No analyses yet
+              </div>
+              <div className="muted" style={{ fontSize: 12.5, marginBottom: 16 }}>
+                Upload a consultation recording to get started.
+              </div>
+              <Link href="/" className="btn btn-primary btn-sm">
+                <Plus size={13} /> New upload
+              </Link>
+            </div>
+          ) : (
+            <div style={{ padding: "60px 20px", textAlign: "center" }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 500,
+                  marginBottom: 4,
+                }}
+              >
+                No consultations match these filters
+              </div>
+              <div className="muted" style={{ fontSize: 12.5 }}>
+                Try widening the date range or clearing outcome chips.
+              </div>
+            </div>
+          )
         ) : (
           rows.map((row) => <Row key={row.upload_id} row={row} />)
         )}
-      </section>
-    </main>
+      </div>
+
+      <div
+        className="muted"
+        style={{ fontSize: 12, marginTop: 12, textAlign: "right" }}
+      >
+        {rows.length} of {allRows.length} consultation
+        {allRows.length === 1 ? "" : "s"}
+      </div>
+    </div>
   );
 }

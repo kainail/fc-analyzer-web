@@ -31,7 +31,6 @@ export default function RerunButton({
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
       setState("done");
-      // Send the user to the status page so they can watch it re-run.
       router.push(`/status/${encodeURIComponent(uploadId)}`);
     } catch (err) {
       setState("error");
@@ -40,12 +39,16 @@ export default function RerunButton({
   }
 
   return (
-    <div className="space-y-2">
+    <div>
       <button
         type="button"
         onClick={onClick}
         disabled={state === "running" || state === "done"}
-        className="inline-block px-4 py-2 border-2 border-amber-600 dark:border-amber-500 rounded-lg text-sm font-medium disabled:opacity-50"
+        className="btn btn-secondary btn-sm"
+        style={{
+          borderColor: "var(--score-amber)",
+          color: "var(--score-amber)",
+        }}
       >
         {state === "idle" && "Re-run analysis"}
         {state === "running" && "Re-queuing…"}
@@ -53,7 +56,15 @@ export default function RerunButton({
         {state === "error" && "Re-run failed — try again"}
       </button>
       {errorMsg && (
-        <p className="text-xs text-red-700 dark:text-red-300">{errorMsg}</p>
+        <p
+          style={{
+            fontSize: 11.5,
+            color: "var(--score-red)",
+            margin: "6px 0 0",
+          }}
+        >
+          {errorMsg}
+        </p>
       )}
     </div>
   );

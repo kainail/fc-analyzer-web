@@ -104,7 +104,11 @@ export function listAnalyzedUploads(): DashboardRow[] {
 
 // --- filtering & sorting ----------------------------------------------------
 
-export type SortKey = "analyzed_desc" | "consultation_desc" | "score_asc";
+export type SortKey =
+  | "analyzed_desc"
+  | "consultation_desc"
+  | "score_asc"
+  | "score_desc";
 
 export type FilterState = {
   outcomes: string[]; // empty = no filter
@@ -112,6 +116,7 @@ export type FilterState = {
   from: string | null; // YYYY-MM-DD
   to: string | null; // YYYY-MM-DD
   sort: SortKey;
+  query: string;
 };
 
 export function parseFilters(
@@ -144,11 +149,16 @@ export function parseFilters(
   const sortRaw =
     typeof searchParams.sort === "string" ? searchParams.sort : "";
   const sort: SortKey =
-    sortRaw === "consultation_desc" || sortRaw === "score_asc"
+    sortRaw === "consultation_desc" ||
+    sortRaw === "score_asc" ||
+    sortRaw === "score_desc"
       ? sortRaw
       : "analyzed_desc";
 
-  return { outcomes, rep, from, to, sort };
+  const query =
+    typeof searchParams.q === "string" ? searchParams.q.trim() : "";
+
+  return { outcomes, rep, from, to, sort, query };
 }
 
 export function applyFilters(
@@ -169,6 +179,17 @@ export function applyFilters(
   if (filters.to) {
     out = out.filter((r) => r.consultation_date <= filters.to!);
   }
+  if (filters.query) {
+    const q = filters.query.toLowerCase();
+    out = out.filter((r) => {
+      return (
+        r.prospect.toLowerCase().includes(q) ||
+        r.rep.toLowerCase().includes(q) ||
+        r.gym.toLowerCase().includes(q) ||
+        (r.scores?.primary_focus_skill ?? "").toLowerCase().includes(q)
+      );
+    });
+  }
 
   const sorted = [...out];
   switch (filters.sort) {
@@ -186,6 +207,16 @@ export function applyFilters(
         if (aScore == null) return 1;
         if (bScore == null) return -1;
         return aScore - bScore;
+      });
+      break;
+    case "score_desc":
+      sorted.sort((a, b) => {
+        const aScore = a.scores?.overall_score;
+        const bScore = b.scores?.overall_score;
+        if (aScore == null && bScore == null) return 0;
+        if (aScore == null) return 1;
+        if (bScore == null) return -1;
+        return bScore - aScore;
       });
       break;
     case "analyzed_desc":

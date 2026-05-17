@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import {
@@ -5,9 +8,17 @@ import {
   DIMENSION_LABELS,
   stageOrDimensionLabel,
   flagLabel,
-  scoreColorClasses,
-  confidenceColorClasses,
 } from "@/lib/analysis-display";
+import { fmtDate, fmtDateLong, scoreBand, bandClass } from "@/lib/format";
+import {
+  ArrowL,
+  Check,
+  ChevronD,
+  Doc,
+  Flag,
+  Play,
+  Target,
+} from "@/lib/icons";
 import RerunButton from "./rerun-button";
 
 export type AnalysisMetadata = {
@@ -104,54 +115,158 @@ export type ParseErrorJson = {
   raw_response: string;
 };
 
-function ScoreChip({ score }: { score: number | null }) {
-  const label = score === null ? "—" : `${score}/10`;
+function isSoldOutcome(outcome: string): boolean {
+  return outcome.startsWith("sold-") || outcome === "transformation-challenge";
+}
+
+function computeOverallScore(stages: StageScore[]): number | null {
+  const numeric = stages
+    .map((s) => s.score)
+    .filter((s): s is number => typeof s === "number");
+  if (numeric.length === 0) return null;
+  return numeric.reduce((a, b) => a + b, 0) / numeric.length;
+}
+
+function countWeakStages(stages: StageScore[]): number {
+  return stages.filter((s) => typeof s.score === "number" && s.score < 6)
+    .length;
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <span
-      className={
-        "inline-flex items-center justify-center px-2 py-0.5 rounded text-xs font-semibold tabular-nums " +
-        scoreColorClasses(score)
-      }
+    <div
+      className="mono"
+      style={{
+        fontSize: 10.5,
+        fontWeight: 600,
+        letterSpacing: "0.08em",
+        color: "var(--ink-4)",
+        textTransform: "uppercase",
+        marginBottom: 10,
+      }}
     >
-      {label}
-    </span>
+      {children}
+    </div>
   );
 }
 
-function Section({
+function MetaInline({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div
+        style={{
+          opacity: 0.65,
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          marginBottom: 2,
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 13.5, fontWeight: 500 }}>{value}</div>
+    </div>
+  );
+}
+
+function ScoreBar({ value }: { value: number | null }) {
+  const band = scoreBand(value);
+  const pct = value != null ? (value / 10) * 100 : 0;
+  const color = `var(--score-${band === "neutral" ? "amber" : band})`;
+  return (
+    <div
+      style={{
+        height: 6,
+        borderRadius: 999,
+        background: "var(--surface-sunken)",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: pct + "%",
+          background: color,
+          borderRadius: 999,
+          transition: "width 250ms ease-out",
+        }}
+      />
+    </div>
+  );
+}
+
+function Collapsible({
   id,
   title,
-  children,
+  subtitle,
   defaultOpen = true,
-  preview,
+  icon,
+  meta,
+  children,
 }: {
-  id: string;
+  id?: string;
   title: string;
-  children: React.ReactNode;
+  subtitle?: string;
   defaultOpen?: boolean;
-  preview?: React.ReactNode;
+  icon?: React.ReactNode;
+  meta?: React.ReactNode;
+  children: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <section
       id={id}
-      className="border border-zinc-200 dark:border-zinc-800 rounded-lg"
+      className="card"
+      style={{ marginBottom: 14, overflow: "hidden" }}
     >
-      <details open={defaultOpen} className="group">
-        <summary className="cursor-pointer list-none px-4 py-3 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3 min-w-0">
-            <h2 className="text-base sm:text-lg font-semibold">{title}</h2>
-            {preview && (
-              <span className="text-xs text-zinc-500 truncate hidden sm:inline">
-                {preview}
-              </span>
-            )}
-          </div>
-          <span className="text-zinc-400 text-sm select-none group-open:rotate-90 transition-transform">
-            ›
-          </span>
-        </summary>
-        <div className="px-4 pb-4 pt-1 space-y-4">{children}</div>
-      </details>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%",
+          border: 0,
+          background: "transparent",
+          padding: "14px 20px",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          textAlign: "left",
+          cursor: "pointer",
+        }}
+      >
+        <ChevronD
+          size={14}
+          style={{
+            color: "var(--ink-4)",
+            transform: open ? "rotate(0)" : "rotate(-90deg)",
+            transition: "transform 150ms",
+          }}
+        />
+        {icon && <span style={{ color: "var(--primary)" }}>{icon}</span>}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
+          {subtitle && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 1 }}>
+              {subtitle}
+            </div>
+          )}
+        </div>
+        {meta}
+      </button>
+      {open && (
+        <div style={{ borderTop: "1px solid var(--divider)" }}>{children}</div>
+      )}
     </section>
   );
 }
@@ -159,11 +274,27 @@ function Section({
 function Evidence({ quotes }: { quotes: string[] }) {
   if (!quotes.length) return null;
   return (
-    <ul className="space-y-2 text-sm">
+    <ul
+      style={{
+        listStyle: "none",
+        padding: 0,
+        margin: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
       {quotes.map((q, i) => (
         <li
           key={i}
-          className="border-l-2 border-zinc-300 dark:border-zinc-700 pl-3 text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap"
+          style={{
+            borderLeft: "2px solid var(--border-strong)",
+            paddingLeft: 12,
+            color: "var(--ink-2)",
+            fontSize: 13,
+            lineHeight: 1.55,
+            whiteSpace: "pre-wrap",
+          }}
         >
           {q}
         </li>
@@ -174,98 +305,439 @@ function Evidence({ quotes }: { quotes: string[] }) {
 
 function MiniLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium">
+    <div
+      className="mono"
+      style={{
+        fontSize: 10.5,
+        fontWeight: 600,
+        letterSpacing: "0.06em",
+        color: "var(--ink-4)",
+        textTransform: "uppercase",
+        marginBottom: 4,
+      }}
+    >
       {children}
     </div>
   );
 }
 
-function CoachingCard({ markdown }: { markdown: string }) {
-  // Hand-styled instead of @tailwindcss/typography. The coaching format
-  // is short: emoji-prefixed section labels + paragraphs, occasionally
-  // bold/italic. These child selectors cover that surface.
+function StageRow({
+  entry,
+  index,
+}: {
+  entry: StageScore;
+  index: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const band = scoreBand(entry.score);
+  const label = STAGE_LABELS[entry.stage] ?? entry.stage;
   return (
     <div
-      className={[
-        "rounded-lg border-2 border-zinc-300 dark:border-zinc-700",
-        "bg-zinc-50 dark:bg-zinc-900/40 p-4 sm:p-5 text-[15px] leading-relaxed",
-        "[&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0",
-        "[&_h1]:text-lg [&_h1]:font-semibold [&_h1]:mt-4 [&_h1]:mb-2 [&_h1:first-child]:mt-0",
-        "[&_h2]:text-base [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2:first-child]:mt-0",
-        "[&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1",
-        "[&_strong]:font-semibold",
-        "[&_em]:italic",
-        "[&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2",
-        "[&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2",
-        "[&_li]:my-0.5",
-        "[&_code]:font-mono [&_code]:text-sm [&_code]:bg-zinc-100 dark:[&_code]:bg-zinc-900 [&_code]:px-1 [&_code]:rounded",
-        "[&_blockquote]:border-l-2 [&_blockquote]:border-zinc-300 dark:[&_blockquote]:border-zinc-700 [&_blockquote]:pl-3 [&_blockquote]:text-zinc-600 dark:[&_blockquote]:text-zinc-400",
-      ].join(" ")}
+      style={{
+        borderTop: index === 0 ? "none" : "1px solid var(--divider)",
+      }}
     >
-      <ReactMarkdown>{markdown}</ReactMarkdown>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="stage-row"
+        style={{
+          width: "100%",
+          border: 0,
+          background: "transparent",
+          padding: "12px 20px",
+          display: "grid",
+          gridTemplateColumns: "32px 1fr 160px 56px 18px",
+          alignItems: "center",
+          gap: 14,
+          textAlign: "left",
+          cursor: "pointer",
+        }}
+      >
+        <span className="mono faint" style={{ fontSize: 11 }}>
+          {String(index + 1).padStart(2, "0")}
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 500, fontSize: 13.5 }}>{label}</div>
+        </div>
+        <ScoreBar value={entry.score} />
+        <span
+          className={`score-pill ${bandClass(band)}`}
+          style={{ justifySelf: "end" }}
+        >
+          {entry.score != null ? entry.score.toFixed(1) : "—"}
+        </span>
+        <ChevronD
+          size={14}
+          style={{
+            color: "var(--ink-4)",
+            transform: expanded ? "rotate(180deg)" : "rotate(0)",
+            transition: "transform 150ms",
+          }}
+        />
+      </button>
+      {expanded && (
+        <div
+          style={{
+            padding: "0 20px 16px 66px",
+            color: "var(--ink-2)",
+            fontSize: 13,
+            lineHeight: 1.55,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          {entry.evidence_quotes.length > 0 && (
+            <div>
+              <MiniLabel>Evidence</MiniLabel>
+              <Evidence quotes={entry.evidence_quotes} />
+            </div>
+          )}
+          {entry.what_worked && (
+            <div>
+              <MiniLabel>What worked</MiniLabel>
+              <p style={{ margin: 0 }}>{entry.what_worked}</p>
+            </div>
+          )}
+          {entry.what_was_missed && (
+            <div>
+              <MiniLabel>What was missed</MiniLabel>
+              <p style={{ margin: 0 }}>{entry.what_was_missed}</p>
+            </div>
+          )}
+          {entry.upstream_consequences && (
+            <div>
+              <MiniLabel>Upstream consequences</MiniLabel>
+              <p style={{ margin: 0 }}>{entry.upstream_consequences}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function PageHeader({ metadata }: { metadata: AnalysisMetadata }) {
+function DimensionCard({ entry }: { entry: CrossCuttingScore }) {
+  const band = scoreBand(entry.score);
+  const label = DIMENSION_LABELS[entry.dimension] ?? entry.dimension;
   return (
-    <header className="space-y-2">
-      <Link
-        href={`/status/${encodeURIComponent(metadata.upload_id)}`}
-        className="text-sm underline"
+    <div style={{ padding: "14px 16px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 8,
+          gap: 8,
+        }}
       >
-        ← Status page
-      </Link>
-      <h1 className="text-2xl sm:text-3xl font-semibold">Call analysis</h1>
-      <div className="text-sm text-zinc-600 dark:text-zinc-400 flex flex-wrap gap-x-3 gap-y-1">
-        <span>
-          <strong>{metadata.prospect}</strong> with {metadata.rep}
+        <span
+          style={{
+            fontSize: 12.5,
+            fontWeight: 500,
+            color: "var(--ink-2)",
+            minWidth: 0,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {label}
         </span>
-        <span>·</span>
-        <span>{metadata.gym}</span>
-        <span>·</span>
-        <span>{metadata.consultation_date}</span>
-        <span>·</span>
-        <span className="font-mono text-xs">{metadata.outcome}</span>
+        <span className={`score-pill ${bandClass(band)}`}>
+          {entry.score.toFixed(1)}
+        </span>
       </div>
-      {metadata.analyzed_at && (
-        <div className="text-xs text-zinc-500">
-          Analyzed {new Date(metadata.analyzed_at).toLocaleString()}
+      <ScoreBar value={entry.score} />
+      {entry.highest_leverage_fix && (
+        <div
+          className="muted"
+          style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.5 }}
+        >
+          {entry.highest_leverage_fix}
         </div>
       )}
-    </header>
+    </div>
   );
 }
 
-function JumpNav() {
-  const items: Array<{ href: string; label: string }> = [
-    { href: "#coaching", label: "Coaching" },
-    { href: "#overall", label: "Overall" },
-    { href: "#outcome", label: "Outcome" },
-    { href: "#focus", label: "Training focus" },
-    { href: "#stages", label: "Stages" },
-    { href: "#dimensions", label: "Dimensions" },
-    { href: "#flags", label: "Flags" },
-    { href: "#roleplay", label: "Roleplay seed" },
+function FlagCard({ entry }: { entry: DiagnosticFlag }) {
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "flex-start",
+        gap: 8,
+        padding: "10px 12px",
+        background: "var(--score-amber-bg)",
+        color: "var(--score-amber)",
+        borderRadius: 8,
+        fontSize: 12.5,
+        fontWeight: 500,
+        maxWidth: "100%",
+      }}
+      title={entry.evidence_quote}
+    >
+      <Flag size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+      <div style={{ minWidth: 0 }}>
+        <div>{flagLabel(entry.flag)}</div>
+        <div
+          className="mono faint"
+          style={{
+            fontSize: 10.5,
+            marginTop: 2,
+            color: "var(--ink-4)",
+          }}
+        >
+          {STAGE_LABELS[entry.stage] ?? entry.stage} ·{" "}
+          {entry.transcript_location}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FocusCard({
+  tier,
+  focus,
+}: {
+  tier: "primary" | "secondary";
+  focus: TrainingFocus | null;
+}) {
+  const isPrimary = tier === "primary";
+  if (!focus) {
+    return (
+      <div
+        className="card card-pad"
+        style={{
+          borderStyle: "dashed",
+          background: "var(--surface)",
+        }}
+      >
+        <div
+          className="mono"
+          style={{
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+            color: "var(--ink-4)",
+            textTransform: "uppercase",
+            marginBottom: 8,
+          }}
+        >
+          Secondary drill focus
+        </div>
+        <div className="muted" style={{ fontSize: 13 }}>
+          No secondary focus — rep is generally strong outside the primary
+          weakness.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div
+      className="card card-pad"
+      style={{
+        borderColor: isPrimary ? "var(--primary-200)" : "var(--border)",
+        background: isPrimary ? "var(--primary-tint)" : "var(--surface)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 8,
+          gap: 8,
+        }}
+      >
+        <span
+          className="mono"
+          style={{
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+            color: isPrimary ? "var(--primary)" : "var(--ink-4)",
+            textTransform: "uppercase",
+          }}
+        >
+          {tier} drill focus
+        </span>
+        <span className="chip chip-neutral">
+          {stageOrDimensionLabel(focus.stage_or_dimension)}
+        </span>
+      </div>
+      <div
+        style={{
+          fontSize: 16,
+          fontWeight: 500,
+          letterSpacing: "-0.005em",
+          marginBottom: 8,
+          color: "var(--ink)",
+          lineHeight: 1.4,
+        }}
+      >
+        {focus.skill}
+      </div>
+      <div
+        className="muted"
+        style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 10 }}
+      >
+        {focus.specific_weakness}
+      </div>
+      {focus.evidence_quotes.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <MiniLabel>Evidence</MiniLabel>
+          <Evidence quotes={focus.evidence_quotes.slice(0, 2)} />
+        </div>
+      )}
+      <div style={{ marginBottom: 8 }}>
+        <MiniLabel>Why this is the priority</MiniLabel>
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-2)" }}>
+          {focus.why_this_is_the_priority}
+        </p>
+      </div>
+      <div>
+        <MiniLabel>Success criteria</MiniLabel>
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-2)" }}>
+          {focus.success_criteria}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function RoleplaySeedBody({ seed }: { seed: RoleplayScenarioSeed }) {
+  const p = seed.prospect_profile;
+  const rows: Array<[string, string]> = [
+    ["Demographic", p.demographic],
+    ["Stated surface goal", p.stated_surface_goal],
+    ["Actual emotional driver", p.actual_emotional_driver],
+    ["Yesterdays pattern", p.yesterdays_pattern],
+    ["Objection likely", p.objection_likely],
+    ["Personality signals", p.personality_signals],
   ];
   return (
-    <nav
-      aria-label="Section jump links"
-      className="sticky top-0 z-10 -mx-4 sm:mx-0 px-4 py-2 bg-white/90 dark:bg-zinc-950/90 backdrop-blur border-b border-zinc-200 dark:border-zinc-800"
+    <div style={{ padding: "16px 20px 20px" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 12,
+          marginBottom: 14,
+        }}
+      >
+        <div>
+          <MiniLabel>Drill target</MiniLabel>
+          <div className="chip chip-primary" style={{ marginTop: 4 }}>
+            {stageOrDimensionLabel(seed.stage_to_drill_enum)}
+          </div>
+        </div>
+        <div>
+          <MiniLabel>Estimated duration</MiniLabel>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>
+            {seed.estimated_drill_duration_minutes} min
+          </div>
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <MiniLabel>Drill scope</MiniLabel>
+          <p style={{ margin: 0, fontSize: 13, color: "var(--ink-2)" }}>
+            {seed.drill_scope_description}
+          </p>
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <MiniLabel>Drill focus</MiniLabel>
+          <p style={{ margin: 0, fontSize: 13, color: "var(--ink-2)" }}>
+            {seed.drill_focus}
+          </p>
+        </div>
+      </div>
+
+      <div
+        style={{
+          background: "var(--surface-2)",
+          border: "1px solid var(--divider)",
+          borderRadius: 8,
+          padding: "14px 16px",
+          marginBottom: 14,
+        }}
+      >
+        <MiniLabel>Prospect profile</MiniLabel>
+        <dl style={{ margin: 0, display: "grid", gap: 6 }}>
+          {rows.map(([k, v]) => (
+            <div key={k} style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+              <span style={{ color: "var(--ink-4)" }}>{k}:</span> {v}
+            </div>
+          ))}
+        </dl>
+      </div>
+
+      {seed.difficulty_modifiers.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <MiniLabel>Difficulty modifiers</MiniLabel>
+          <ul
+            style={{
+              paddingLeft: 18,
+              margin: 0,
+              fontSize: 12.5,
+              color: "var(--ink-2)",
+            }}
+          >
+            {seed.difficulty_modifiers.map((m, i) => (
+              <li key={i} style={{ marginBottom: 4 }}>
+                {m}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div>
+        <MiniLabel>Success definition</MiniLabel>
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-2)" }}>
+          {seed.success_definition}
+        </p>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          marginTop: 14,
+          alignItems: "center",
+          paddingTop: 14,
+          borderTop: "1px solid var(--divider)",
+        }}
+      >
+        <button type="button" className="btn btn-primary btn-sm" disabled>
+          <Play size={12} /> Start roleplay
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" disabled>
+          <Doc size={13} /> Print drill card
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CoachingCard({ markdown }: { markdown: string }) {
+  return (
+    <div
+      className="markdown-body"
+      style={{
+        background: "rgba(255, 255, 255, 0.10)",
+        backdropFilter: "blur(8px)",
+        border: "1px solid rgba(255, 255, 255, 0.18)",
+        borderRadius: 12,
+        padding: "16px 18px",
+        color: "#fff",
+        fontSize: 14,
+        lineHeight: 1.55,
+      }}
     >
-      <ul className="flex gap-2 overflow-x-auto text-xs">
-        {items.map((it) => (
-          <li key={it.href} className="shrink-0">
-            <a
-              href={it.href}
-              className="inline-block px-2.5 py-1 rounded-full border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-900"
-            >
-              {it.label}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </nav>
+      <ReactMarkdown>{markdown}</ReactMarkdown>
+    </div>
   );
 }
 
@@ -279,272 +751,76 @@ function ParseErrorPanel({
   rawResponse: string;
 }) {
   return (
-    <div className="rounded-lg border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40 p-4 space-y-3">
-      <div>
-        <div className="text-xs uppercase tracking-wide text-amber-800 dark:text-amber-300 font-semibold">
-          Output partially unparseable
-        </div>
-        <p className="text-sm text-amber-900 dark:text-amber-100 mt-1">
-          The analyzer ran but the structured JSON payload couldn&rsquo;t be
-          parsed. The coaching message below is what came back. Re-run the
-          analysis to try again — this usually resolves a one-off output
-          formatting issue.
-        </p>
-        <p className="text-xs text-amber-800 dark:text-amber-300 mt-2 font-mono break-all">
-          {parseError}
-        </p>
+    <div
+      style={{
+        border: "2px solid var(--score-amber)",
+        background: "var(--score-amber-bg)",
+        borderRadius: "var(--r-md)",
+        padding: 16,
+        marginBottom: 18,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color: "var(--score-amber)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          marginBottom: 4,
+        }}
+      >
+        Output partially unparseable
       </div>
+      <p
+        style={{
+          margin: 0,
+          fontSize: 13,
+          color: "var(--ink-2)",
+          marginBottom: 10,
+        }}
+      >
+        The analyzer ran but the structured JSON payload couldn&rsquo;t be
+        parsed. The coaching message below is what came back. Re-run the
+        analysis to try again.
+      </p>
+      <p
+        className="mono"
+        style={{
+          margin: 0,
+          marginBottom: 10,
+          fontSize: 11,
+          color: "var(--ink-3)",
+          wordBreak: "break-all",
+        }}
+      >
+        {parseError}
+      </p>
       <RerunButton uploadId={uploadId} />
-      <details className="text-xs">
-        <summary className="cursor-pointer underline">
+      <details style={{ marginTop: 10, fontSize: 12 }}>
+        <summary style={{ cursor: "pointer", color: "var(--ink-3)" }}>
           Show raw analyzer response
         </summary>
-        <pre className="mt-2 p-2 bg-white dark:bg-zinc-900 rounded border border-amber-300 dark:border-amber-800 whitespace-pre-wrap break-words max-h-96 overflow-auto">
+        <pre
+          style={{
+            marginTop: 8,
+            padding: 10,
+            background: "var(--surface)",
+            border: "1px solid var(--score-amber)",
+            borderRadius: 6,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            maxHeight: 380,
+            overflow: "auto",
+            fontSize: 11.5,
+            fontFamily: "var(--font-mono)",
+          }}
+        >
           {rawResponse}
         </pre>
       </details>
     </div>
   );
-}
-
-function StageCard({ entry }: { entry: StageScore }) {
-  return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-semibold text-sm sm:text-base">
-          {STAGE_LABELS[entry.stage] ?? entry.stage}
-        </h3>
-        <ScoreChip score={entry.score} />
-      </div>
-      <Evidence quotes={entry.evidence_quotes} />
-      {entry.what_worked && (
-        <div>
-          <MiniLabel>What worked</MiniLabel>
-          <p className="text-sm">{entry.what_worked}</p>
-        </div>
-      )}
-      {entry.what_was_missed && (
-        <div>
-          <MiniLabel>What was missed</MiniLabel>
-          <p className="text-sm">{entry.what_was_missed}</p>
-        </div>
-      )}
-      {entry.upstream_consequences && (
-        <div>
-          <MiniLabel>Upstream consequences</MiniLabel>
-          <p className="text-sm">{entry.upstream_consequences}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DimensionCard({ entry }: { entry: CrossCuttingScore }) {
-  return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-semibold text-sm sm:text-base">
-          {DIMENSION_LABELS[entry.dimension] ?? entry.dimension}
-        </h3>
-        <ScoreChip score={entry.score} />
-      </div>
-      <Evidence quotes={entry.evidence_quotes} />
-      {entry.pattern_observed && (
-        <div>
-          <MiniLabel>Pattern observed</MiniLabel>
-          <p className="text-sm">{entry.pattern_observed}</p>
-        </div>
-      )}
-      {entry.highest_leverage_fix && (
-        <div>
-          <MiniLabel>Highest leverage fix</MiniLabel>
-          <p className="text-sm">{entry.highest_leverage_fix}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FlagCard({ entry }: { entry: DiagnosticFlag }) {
-  return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 space-y-2">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <h3 className="font-semibold text-sm sm:text-base">
-          {flagLabel(entry.flag)}
-        </h3>
-        <div className="text-xs text-zinc-500 font-mono">
-          {STAGE_LABELS[entry.stage] ?? entry.stage} · {entry.transcript_location}
-        </div>
-      </div>
-      <Evidence quotes={[entry.evidence_quote]} />
-      {entry.downstream_consequences.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          <MiniLabel>Caused →</MiniLabel>
-          {entry.downstream_consequences.map((d) => (
-            <span
-              key={d}
-              className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 font-mono"
-            >
-              {flagLabel(d)}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TrainingFocusCard({
-  title,
-  focus,
-}: {
-  title: string;
-  focus: TrainingFocus;
-}) {
-  return (
-    <div className="border-2 border-zinc-300 dark:border-zinc-700 rounded-lg p-4 space-y-3">
-      <div>
-        <div className="text-xs uppercase tracking-wide text-zinc-500 font-semibold">
-          {title}
-        </div>
-        <h3 className="text-lg font-semibold mt-1">{focus.skill}</h3>
-        <div className="text-xs text-zinc-500 font-mono mt-0.5">
-          targets: {stageOrDimensionLabel(focus.stage_or_dimension)}
-        </div>
-      </div>
-      <div>
-        <MiniLabel>Specific weakness</MiniLabel>
-        <p className="text-sm">{focus.specific_weakness}</p>
-      </div>
-      <Evidence quotes={focus.evidence_quotes} />
-      <div>
-        <MiniLabel>Why this is the priority</MiniLabel>
-        <p className="text-sm">{focus.why_this_is_the_priority}</p>
-      </div>
-      <div>
-        <MiniLabel>Success criteria</MiniLabel>
-        <p className="text-sm">{focus.success_criteria}</p>
-      </div>
-    </div>
-  );
-}
-
-function PredictedOutcomeCard({ outcome }: { outcome: PredictedOutcome }) {
-  return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-mono px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900">
-          {outcome.bucket}
-        </span>
-        <span
-          className={
-            "text-xs px-2 py-0.5 rounded uppercase tracking-wide " +
-            confidenceColorClasses(outcome.confidence)
-          }
-        >
-          {outcome.confidence} confidence
-        </span>
-        <span className="text-xs text-zinc-500">
-          {outcome.actual_outcome_evident
-            ? "outcome explicit in transcript"
-            : "outcome inferred"}
-        </span>
-      </div>
-      <div>
-        <MiniLabel>Surface reasoning</MiniLabel>
-        <p className="text-sm">{outcome.surface_reasoning}</p>
-      </div>
-      <div>
-        <MiniLabel>Underlying cause</MiniLabel>
-        <p className="text-sm">{outcome.underlying_cause}</p>
-      </div>
-      {outcome.primary_diagnostic_flags_implicated.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          <MiniLabel>Implicated flags</MiniLabel>
-          {outcome.primary_diagnostic_flags_implicated.map((f) => (
-            <span
-              key={f}
-              className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 font-mono"
-            >
-              {flagLabel(f)}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RoleplaySeedCard({ seed }: { seed: RoleplayScenarioSeed }) {
-  const p = seed.prospect_profile;
-  const profileRows: Array<[string, string]> = [
-    ["Demographic", p.demographic],
-    ["Stated surface goal", p.stated_surface_goal],
-    ["Actual emotional driver", p.actual_emotional_driver],
-    ["Yesterdays pattern", p.yesterdays_pattern],
-    ["Objection likely", p.objection_likely],
-    ["Personality signals", p.personality_signals],
-  ];
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-mono px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900">
-          {stageOrDimensionLabel(seed.stage_to_drill_enum)}
-        </span>
-        <span className="text-zinc-500">
-          · ~{seed.estimated_drill_duration_minutes} min
-        </span>
-      </div>
-      <div>
-        <MiniLabel>Drill scope</MiniLabel>
-        <p className="text-sm">{seed.drill_scope_description}</p>
-      </div>
-      <div>
-        <MiniLabel>Drill focus</MiniLabel>
-        <p className="text-sm">{seed.drill_focus}</p>
-      </div>
-      <div>
-        <MiniLabel>Prospect profile</MiniLabel>
-        <dl className="grid grid-cols-1 gap-2 mt-1">
-          {profileRows.map(([k, v]) => (
-            <div key={k} className="text-sm">
-              <span className="text-zinc-500">{k}:</span> {v}
-            </div>
-          ))}
-        </dl>
-      </div>
-      {seed.difficulty_modifiers.length > 0 && (
-        <div>
-          <MiniLabel>Difficulty modifiers</MiniLabel>
-          <ul className="list-disc pl-5 text-sm space-y-1">
-            {seed.difficulty_modifiers.map((m, i) => (
-              <li key={i}>{m}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div>
-        <MiniLabel>Success definition</MiniLabel>
-        <p className="text-sm">{seed.success_definition}</p>
-      </div>
-    </div>
-  );
-}
-
-function StagePreview({ stages }: { stages: StageScore[] }) {
-  const lows = stages.filter((s) => s.score !== null && s.score <= 5).length;
-  const nulls = stages.filter((s) => s.score === null).length;
-  if (lows === 0 && nulls === 0) return <>all stages 6+</>;
-  const parts: string[] = [];
-  if (lows) parts.push(`${lows} below 6`);
-  if (nulls) parts.push(`${nulls} not reached`);
-  return <>{parts.join(" · ")}</>;
-}
-
-function DimensionPreview({ dims }: { dims: CrossCuttingScore[] }) {
-  const lows = dims.filter((d) => d.score <= 5).length;
-  if (lows === 0) return <>all dimensions 6+</>;
-  return <>{lows} below 6</>;
 }
 
 export default function AnalysisView({
@@ -559,120 +835,559 @@ export default function AnalysisView({
   parseErrorJson: ParseErrorJson | null;
 }) {
   const hasParseError = parseErrorJson !== null || !!metadata.json_parse_error;
+  const sold = isSoldOutcome(metadata.outcome);
+
+  // No structured JSON → degraded view with coaching markdown only.
+  if (hasParseError || !json) {
+    return (
+      <div className="content">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            color: "var(--ink-3)",
+            fontSize: 12.5,
+            marginBottom: 14,
+          }}
+        >
+          <Link
+            href={`/status/${encodeURIComponent(metadata.upload_id)}`}
+            className="btn btn-ghost btn-sm"
+            style={{ height: 24, padding: "0 8px", marginLeft: -8 }}
+          >
+            <ArrowL size={13} /> Status
+          </Link>
+          <span className="mono" style={{ color: "var(--ink-4)" }}>
+            · {metadata.upload_id}
+          </span>
+        </div>
+
+        <div className="page-head">
+          <div>
+            <h2>{metadata.prospect}</h2>
+            <div className="sub">
+              {fmtDateLong(metadata.consultation_date)} · {metadata.rep} ·{" "}
+              {metadata.gym}
+            </div>
+          </div>
+        </div>
+
+        {parseErrorJson && (
+          <ParseErrorPanel
+            uploadId={metadata.upload_id}
+            parseError={parseErrorJson.parse_error}
+            rawResponse={parseErrorJson.raw_response}
+          />
+        )}
+
+        <div className="card card-pad">
+          <SectionLabel>Coaching message</SectionLabel>
+          <div className="markdown-body" style={{ fontSize: 14, lineHeight: 1.6 }}>
+            <ReactMarkdown>{coaching}</ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const overall = computeOverallScore(json.stage_scores);
+  const weakStages = countWeakStages(json.stage_scores);
+  const predictedSold = isSoldOutcome(json.predicted_outcome.bucket);
+  const predictionMatched = predictedSold === sold;
+  const overallBand = scoreBand(overall);
 
   return (
-    <main className="mx-auto max-w-3xl p-4 space-y-5">
-      <PageHeader metadata={metadata} />
+    <div className="content">
+      {/* Sub-nav back */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          color: "var(--ink-3)",
+          fontSize: 12.5,
+          marginBottom: 14,
+        }}
+      >
+        <Link
+          href="/dashboard"
+          className="btn btn-ghost btn-sm"
+          style={{ height: 24, padding: "0 8px", marginLeft: -8 }}
+        >
+          <ArrowL size={13} /> Dashboard
+        </Link>
+        <span className="mono" style={{ color: "var(--ink-4)" }}>
+          · {metadata.upload_id}
+        </span>
+      </div>
 
-      {hasParseError && parseErrorJson && (
-        <ParseErrorPanel
-          uploadId={metadata.upload_id}
-          parseError={parseErrorJson.parse_error}
-          rawResponse={parseErrorJson.raw_response}
+      {/* Hero coaching message */}
+      <div
+        style={{
+          position: "relative",
+          background:
+            "linear-gradient(140deg, var(--primary-700) 0%, var(--primary) 60%, var(--primary-600) 100%)",
+          borderRadius: "var(--r-lg)",
+          padding: "28px 32px",
+          color: "#fff",
+          overflow: "hidden",
+          marginBottom: 18,
+        }}
+      >
+        <div className="hero-aurora" />
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            opacity: 0.08,
+            pointerEvents: "none",
+            backgroundImage:
+              "linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)",
+            backgroundSize: "32px 32px",
+            maskImage:
+              "radial-gradient(ellipse at 80% 30%, #000 0%, transparent 60%)",
+          }}
         />
-      )}
 
-      {!hasParseError && <JumpNav />}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 20,
+            position: "relative",
+            zIndex: 1,
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 14,
+                opacity: 0.85,
+              }}
+            >
+              <span
+                className="mono"
+                style={{
+                  fontSize: 10.5,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  background: "rgba(255,255,255,0.14)",
+                  padding: "3px 8px",
+                  borderRadius: 4,
+                }}
+              >
+                Coaching headline
+              </span>
+              <span style={{ fontSize: 12.5 }}>
+                {metadata.prospect} · {fmtDateLong(metadata.consultation_date)}
+              </span>
+            </div>
 
-      <section id="coaching" className="space-y-2">
-        <h2 className="text-base font-semibold sm:hidden">Coaching message</h2>
-        <CoachingCard markdown={coaching} />
+            <CoachingCard markdown={coaching} />
+          </div>
+
+          {/* Big score */}
+          <div
+            style={{
+              flexShrink: 0,
+              textAlign: "center",
+              background: "rgba(255,255,255,0.1)",
+              backdropFilter: "blur(8px)",
+              border: "1px solid rgba(255,255,255,0.18)",
+              borderRadius: 14,
+              padding: "16px 22px",
+              minWidth: 140,
+            }}
+          >
+            <div
+              className="mono"
+              style={{
+                fontSize: 10.5,
+                letterSpacing: "0.1em",
+                opacity: 0.8,
+                textTransform: "uppercase",
+              }}
+            >
+              Overall
+            </div>
+            <div
+              className="mono"
+              style={{
+                fontSize: 48,
+                fontWeight: 600,
+                letterSpacing: "-0.04em",
+                lineHeight: 1,
+                marginTop: 6,
+              }}
+            >
+              {overall != null ? overall.toFixed(1) : "—"}
+              <span
+                style={{ fontSize: 18, opacity: 0.55, fontWeight: 500 }}
+              >
+                /10
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: 11.5,
+                opacity: 0.85,
+                marginTop: 8,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                fontWeight: 600,
+              }}
+            >
+              {overallBand === "green"
+                ? "Strong"
+                : overallBand === "yellow"
+                  ? "Solid"
+                  : overallBand === "amber"
+                    ? "Needs work"
+                    : overallBand === "red"
+                      ? "Critical"
+                      : "—"}
+            </div>
+          </div>
+        </div>
+
+        {/* Meta strip */}
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 18,
+            marginTop: 22,
+            paddingTop: 18,
+            borderTop: "1px solid rgba(255,255,255,0.15)",
+            fontSize: 12.5,
+            position: "relative",
+            zIndex: 1,
+          }}
+        >
+          <MetaInline label="Rep" value={metadata.rep} />
+          <MetaInline label="Gym" value={metadata.gym} />
+          <MetaInline
+            label="Outcome"
+            value={
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "rgba(255,255,255,0.14)",
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  fontWeight: 500,
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 999,
+                    background: sold ? "#7FE3A0" : "rgba(255,255,255,0.8)",
+                  }}
+                />
+                {metadata.outcome}
+              </span>
+            }
+          />
+          <MetaInline
+            label="Weak stages"
+            value={weakStages === 0 ? "None — exemplar" : `${weakStages} of 9`}
+          />
+        </div>
+      </div>
+
+      {/* Two-column: Assessment + Prediction */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.4fr 1fr",
+          gap: 14,
+          marginBottom: 14,
+        }}
+      >
+        <div className="card card-pad">
+          <SectionLabel>Overall assessment</SectionLabel>
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.6,
+              color: "var(--ink-2)",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {json.overall_assessment}
+          </div>
+        </div>
+
+        <div className="card card-pad">
+          <SectionLabel>Predicted outcome</SectionLabel>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginTop: 6,
+            }}
+          >
+            <div
+              style={{
+                padding: "6px 12px",
+                borderRadius: 8,
+                background: predictedSold ? "var(--sold-bg)" : "var(--notsold-bg)",
+                color: predictedSold ? "var(--sold)" : "var(--notsold)",
+                fontWeight: 600,
+                fontSize: 13,
+                letterSpacing: "-0.005em",
+              }}
+            >
+              {json.predicted_outcome.bucket}
+            </div>
+            <div>
+              <div
+                className="mono"
+                style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}
+              >
+                {json.predicted_outcome.confidence}
+              </div>
+              <div
+                className="mono faint"
+                style={{
+                  fontSize: 10.5,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                confidence
+              </div>
+            </div>
+          </div>
+          <div
+            className="muted"
+            style={{
+              fontSize: 12.5,
+              marginTop: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            {json.predicted_outcome.surface_reasoning}
+          </div>
+          <div
+            style={{
+              marginTop: 12,
+              padding: "8px 10px",
+              background: predictionMatched
+                ? "var(--score-green-bg)"
+                : "var(--score-amber-bg)",
+              color: predictionMatched
+                ? "var(--score-green)"
+                : "var(--score-amber)",
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 500,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {predictionMatched ? (
+              <Check size={13} stroke={2.4} />
+            ) : (
+              <Flag size={13} />
+            )}
+            {predictionMatched
+              ? "Matched actual outcome"
+              : "Did not match actual outcome"}
+          </div>
+        </div>
+      </div>
+
+      {/* Training focus cards */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 14,
+          marginBottom: 14,
+        }}
+      >
+        <FocusCard tier="primary" focus={json.primary_training_focus} />
+        <FocusCard tier="secondary" focus={json.secondary_training_focus} />
+      </div>
+
+      {/* Stage scores */}
+      <Collapsible
+        id="stages"
+        title="Stage scores"
+        subtitle="9 stages of the consultation framework"
+        defaultOpen={true}
+        meta={
+          <span className="mono faint" style={{ fontSize: 12 }}>
+            {weakStages} weak
+          </span>
+        }
+      >
+        <div style={{ padding: "4px 0 4px" }}>
+          {json.stage_scores.map((s, i) => (
+            <StageRow key={s.stage} entry={s} index={i} />
+          ))}
+        </div>
+      </Collapsible>
+
+      {/* Dimensions */}
+      <Collapsible
+        id="dimensions"
+        title="Cross-cutting dimensions"
+        subtitle="Behaviors that show up across every stage"
+        defaultOpen={true}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            padding: 6,
+          }}
+        >
+          {json.cross_cutting_scores.map((d, i) => {
+            const col = i % 3;
+            const row = Math.floor(i / 3);
+            const totalRows = Math.ceil(json.cross_cutting_scores.length / 3);
+            return (
+              <div
+                key={d.dimension}
+                style={{
+                  borderRight: col < 2 ? "1px solid var(--divider)" : "none",
+                  borderBottom:
+                    row < totalRows - 1 ? "1px solid var(--divider)" : "none",
+                }}
+              >
+                <DimensionCard entry={d} />
+              </div>
+            );
+          })}
+        </div>
+      </Collapsible>
+
+      {/* Diagnostic flags */}
+      <section
+        id="flags"
+        className="card"
+        style={{ marginBottom: 14, overflow: "hidden" }}
+      >
+        <div
+          style={{
+            padding: "16px 20px 12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+              Diagnostic flags
+            </h3>
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              Specific patterns the model surfaced from the transcript.
+            </div>
+          </div>
+          <span className="mono faint" style={{ fontSize: 12 }}>
+            {json.diagnostic_flags.length} found
+          </span>
+        </div>
+        {json.diagnostic_flags.length === 0 ? (
+          <div
+            style={{
+              padding: "0 20px 20px",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              color: "var(--score-green)",
+              fontSize: 13,
+            }}
+          >
+            <Check size={16} stroke={2.4} /> Clean run — no diagnostic flags
+            raised.
+          </div>
+        ) : (
+          <div
+            style={{
+              padding: "0 12px 12px 20px",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+            }}
+          >
+            {json.diagnostic_flags.map((f, i) => (
+              <FlagCard key={`${f.flag}-${i}`} entry={f} />
+            ))}
+          </div>
+        )}
       </section>
 
-      {!hasParseError && json && (
-        <>
-          <Section id="overall" title="Overall assessment">
-            <p className="text-sm whitespace-pre-wrap">
-              {json.overall_assessment}
-            </p>
-          </Section>
-
-          <Section id="outcome" title="Predicted outcome">
-            <PredictedOutcomeCard outcome={json.predicted_outcome} />
-          </Section>
-
-          <Section id="focus" title="Training focus">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <TrainingFocusCard
-                title="Primary"
-                focus={json.primary_training_focus}
-              />
-              {json.secondary_training_focus ? (
-                <TrainingFocusCard
-                  title="Secondary"
-                  focus={json.secondary_training_focus}
-                />
-              ) : (
-                <div className="border border-dashed border-zinc-300 dark:border-zinc-700 rounded-lg p-4 text-sm text-zinc-500">
-                  No secondary focus — rep is generally strong outside the
-                  primary weakness.
-                </div>
-              )}
-            </div>
-          </Section>
-
-          <Section
-            id="stages"
-            title="Stage scores"
-            preview={<StagePreview stages={json.stage_scores} />}
+      {/* Roleplay seed */}
+      <Collapsible
+        id="roleplay"
+        title="Roleplay scenario seed"
+        subtitle="Drill script generated from this call's weakest moment"
+        defaultOpen={false}
+        icon={<Target size={14} />}
+        meta={
+          json.roleplay_scenario_seed ? (
+            <span className="chip chip-primary">
+              <span className="dot" />
+              Ready to run
+            </span>
+          ) : (
+            <span className="mono faint" style={{ fontSize: 12 }}>
+              not generated
+            </span>
+          )
+        }
+      >
+        {json.roleplay_scenario_seed ? (
+          <RoleplaySeedBody seed={json.roleplay_scenario_seed} />
+        ) : (
+          <div
+            style={{
+              padding: "16px 20px 20px",
+              color: "var(--ink-3)",
+              fontSize: 13,
+            }}
           >
-            <div className="space-y-3">
-              {json.stage_scores.map((s) => (
-                <StageCard key={s.stage} entry={s} />
-              ))}
-            </div>
-          </Section>
-
-          <Section
-            id="dimensions"
-            title="Cross-cutting dimensions"
-            preview={<DimensionPreview dims={json.cross_cutting_scores} />}
-          >
-            <div className="space-y-3">
-              {json.cross_cutting_scores.map((d) => (
-                <DimensionCard key={d.dimension} entry={d} />
-              ))}
-            </div>
-          </Section>
-
-          <Section
-            id="flags"
-            title="Diagnostic flags"
-            preview={
-              <>
-                {json.diagnostic_flags.length} flag
-                {json.diagnostic_flags.length === 1 ? "" : "s"}
-              </>
-            }
-          >
-            {json.diagnostic_flags.length === 0 ? (
-              <p className="text-sm text-zinc-500">No diagnostic flags triggered.</p>
-            ) : (
-              <div className="space-y-3">
-                {json.diagnostic_flags.map((f, i) => (
-                  <FlagCard key={`${f.flag}-${i}`} entry={f} />
-                ))}
-              </div>
-            )}
-          </Section>
-
-          <Section id="roleplay" title="Roleplay scenario seed" defaultOpen={false}>
-            {json.roleplay_scenario_seed ? (
-              <RoleplaySeedCard seed={json.roleplay_scenario_seed} />
-            ) : (
-              <p className="text-sm text-zinc-500">
-                No roleplay seed — transcript was too sparse to construct a
-                meaningful drill scenario.
-              </p>
-            )}
-          </Section>
-
-          <div className="text-xs text-zinc-500 pt-2 border-t border-zinc-200 dark:border-zinc-800">
-            Analyzer version {json.analyzer_version} ·{" "}
-            <span className="font-mono">{json.transcript_id}</span>
+            Transcript was too sparse to construct a meaningful drill scenario.
           </div>
-        </>
-      )}
-    </main>
+        )}
+      </Collapsible>
+
+      {/* Footer */}
+      <div
+        style={{
+          marginTop: 24,
+          paddingTop: 18,
+          borderTop: "1px solid var(--divider)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          color: "var(--ink-4)",
+          fontSize: 12,
+          flexWrap: "wrap",
+          gap: 8,
+        }}
+      >
+        <span className="mono">
+          Analyzer {json.analyzer_version} ·{" "}
+          {metadata.analyzed_at
+            ? new Date(metadata.analyzed_at).toLocaleString()
+            : fmtDate(metadata.consultation_date)}{" "}
+          · {json.transcript_id}
+        </span>
+      </div>
+    </div>
   );
 }
