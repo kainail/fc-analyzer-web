@@ -1,10 +1,10 @@
-import fs from "node:fs";
-import path from "node:path";
 import Link from "next/link";
+import { prisma } from "@/lib/db";
 import {
   listAnalyzedUploads,
+  listOrgReps,
   parseFilters,
-  applyFilters,
+  resolveCallerOrgId,
   type DashboardRow,
 } from "@/lib/dashboard-data";
 import { ALL_OUTCOMES } from "@/lib/outcomes";
@@ -13,16 +13,6 @@ import { ChevronR, Plus, TrendUp } from "@/lib/icons";
 import DashboardFilters from "./dashboard-filters";
 
 export const dynamic = "force-dynamic";
-
-function loadReps(): string[] {
-  try {
-    const p = path.join(process.cwd(), "config", "staff.json");
-    const data = JSON.parse(fs.readFileSync(p, "utf8")) as { reps?: string[] };
-    return data.reps ?? [];
-  } catch {
-    return [];
-  }
-}
 
 function isSoldOutcome(outcome: string): boolean {
   return outcome.startsWith("sold-") || outcome === "transformation-challenge";
@@ -263,9 +253,22 @@ export default async function DashboardPage({
 }) {
   const sp = await searchParams;
   const filters = parseFilters(sp);
-  const allRows = listAnalyzedUploads();
-  const rows = applyFilters(allRows, filters);
-  const reps = loadReps();
+
+  // Tenant context: every dashboard read is scoped to the caller's
+  // Org. No org = no rows. The page still renders the chrome around
+  // the empty state so an unauthed visitor doesn't see a broken page.
+  const orgId = await resolveCallerOrgId();
+  const [rows, reps, totalCount] = orgId
+    ? await Promise.all([
+        listAnalyzedUploads(orgId, filters),
+        listOrgReps(orgId),
+        prisma.upload.count({ where: { orgId, status: "analyzed" } }),
+      ])
+    : [
+        [] as DashboardRow[],
+        [] as Array<{ userId: string; name: string }>,
+        0,
+      ];
 
   // Stats computed from the FILTERED set (matches the design behavior).
   const stats = (() => {
@@ -402,7 +405,7 @@ export default async function DashboardPage({
         </div>
 
         {rows.length === 0 ? (
-          allRows.length === 0 ? (
+          totalCount === 0 ? (
             <div style={{ padding: "60px 20px", textAlign: "center" }}>
               <div
                 style={{
@@ -445,8 +448,8 @@ export default async function DashboardPage({
         className="muted"
         style={{ fontSize: 12, marginTop: 12, textAlign: "right" }}
       >
-        {rows.length} of {allRows.length} consultation
-        {allRows.length === 1 ? "" : "s"}
+        {rows.length} of {totalCount} consultation
+        {totalCount === 1 ? "" : "s"}
       </div>
     </div>
   );

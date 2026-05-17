@@ -6,7 +6,10 @@ import { OUTCOME_GROUPS } from "@/lib/outcomes";
 import { Search } from "@/lib/icons";
 
 type Props = {
-  reps: string[];
+  // reps now come from Clerk via Postgres Membership lookups.
+  // userId is the Clerk id we store filtering on, name is what the
+  // dropdown displays.
+  reps: Array<{ userId: string; name: string }>;
   initial: {
     outcomes: string[];
     rep: string | null;
@@ -281,8 +284,8 @@ export default function DashboardFilters({ reps, initial }: Props) {
         >
           <option value="">All reps</option>
           {reps.map((r) => (
-            <option key={r} value={r}>
-              {r}
+            <option key={r.userId} value={r.userId}>
+              {r.name}
             </option>
           ))}
         </select>
