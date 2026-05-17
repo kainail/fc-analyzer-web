@@ -1,8 +1,17 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
-
 @import "tailwindcss";
 
-/* FC Analyzer — design tokens + globals */
+/* FC Analyzer — design tokens + globals.
+ *
+ * Fonts: DM Sans and JetBrains Mono are loaded via next/font/google in
+ * app/layout.tsx, which injects --font-sans and --font-mono on <html>.
+ * We DON'T use @import url(...) here — Tailwind v4's PostCSS pass
+ * strips external @imports when they sit alongside @import "tailwindcss",
+ * which silently drops the fonts and (when Turbopack's dev cache gets
+ * out of sync) the whole stylesheet falls back to a stale version.
+ *
+ * The fallback chain below is defensive: if next/font fails for any
+ * reason, we fall through to ui-sans-serif / system-ui rather than
+ * Times. */
 
 :root {
   /* Palette — original violet/scarlet, light-mode default */
@@ -50,9 +59,10 @@
   --notsold: #6B6580;
   --notsold-bg: #ECEAF1;
 
-  /* Type */
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* Type — --font-sans and --font-mono are injected on <html> by
+   * next/font/google in layout.tsx. We do NOT redefine them here:
+   * doing so would shadow the next/font variables and pin the family
+   * to whatever this file declared, breaking the swap fallback. */
 
   /* Radii / shadow */
   --r-sm: 6px;
