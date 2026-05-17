@@ -1,0 +1,117 @@
+// FC Analyzer schema — multi-tenant Postgres + R2 object storage.
+//
+// One Organization per gym (or gym group). Membership joins a Clerk
+// userId to an org with a role. Upload owns metadata; the actual
+// audio/transcript/analysis bytes live in R2 and are referenced via
+// *R2Key fields. Each Upload has at most one Transcript and one
+// Analysis (1:1, lazily created as the pipeline progresses).
+//
+// All foreign keys cascade on delete: removing an Organization wipes
+// its memberships, uploads, transcripts, and analyses. Removing an
+// Upload wipes its Transcript and Analysis (the R2 objects must be
+// deleted separately — the DB doesn't know about R2).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  owner
+  manager
+  rep
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  memberships Membership[]
+  uploads     Upload[]
+  transcripts Transcript[]
+  analyses    Analysis[]
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  orgId     String
+  role      Role
+  createdAt DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+  @@index([userId])
+}
+
+model Upload {
+  id                String   @id @default(cuid())
+  orgId             String
+  repUserId         String
+  prospectName      String
+  consultationDate  DateTime
+  outcome           String
+  audioR2Key        String
+  audioFilename     String
+  audioSizeBytes    Int
+  status            String
+  chunkCount        Int?
+  errorMessage      String?
+  errorAt           DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  transcript Transcript?
+  analysis   Analysis?
+
+  @@index([orgId, status])
+  @@index([orgId, createdAt])
+  @@index([repUserId])
+}
+
+model Transcript {
+  id               String   @id @default(cuid())
+  uploadId         String   @unique
+  orgId            String
+  textR2Key        String
+  jsonR2Key        String
+  durationSeconds  Float?
+  wordCount        Int?
+  createdAt        DateTime @default(now())
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  upload Upload       @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model Analysis {
+  id                    String   @id @default(cuid())
+  uploadId              String   @unique
+  orgId                 String
+  jsonR2Key             String
+  coachingR2Key         String
+  analyzerVersion       String?
+  overallScore          Float?
+  weakStageCount        Int?
+  primaryTrainingFocus  String?
+  predictedOutcome      String?
+  predictedConfidence   String?
+  jsonParseError        String?
+  analyzedAt            DateTime?
+  createdAt             DateTime @default(now())
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  upload Upload       @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
