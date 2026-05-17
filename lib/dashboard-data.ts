@@ -1,10 +1,20 @@
-// Server-only helpers for /dashboard. Reads processed/<id>/metadata.json
-// as the canonical "analyzed" index, enriched with score data pulled
-// from analyses/json/<id>.json where the payload parsed cleanly.
-
-import fs from "node:fs";
-import path from "node:path";
-import { getProcessedRoot } from "@/lib/upload-id";
+/**
+ * Server-only data layer for /dashboard.
+ *
+ * listAnalyzedUploads(orgId, filters) — single Prisma query joining
+ * Upload to its Analysis, filtered/sorted server-side. Returns the
+ * same DashboardRow shape the existing dashboard page already
+ * renders (rep + gym + prospect + consultation_date + outcome +
+ * status + analyzed_at + json_parse_error + scores{...}).
+ *
+ * Rep display names are resolved via Clerk in a single batched
+ * lookup over the unique repUserIds in the result set, so an N-row
+ * dashboard hits the Clerk API exactly once (not N times). Gym is
+ * the Organization name.
+ */
+import { auth, clerkClient } from "@clerk/nextjs/server";
+import { prisma } from "@/lib/db";
+import type { Prisma } from "@/lib/generated/prisma/client";
 
 export type RowMetadata = {
   upload_id: string;
@@ -29,79 +39,6 @@ export type DashboardRow = RowMetadata & {
   scores: RowScores | null; // null for parse-error rows
 };
 
-type AnalyzerJsonLike = {
-  predicted_outcome?: { bucket?: string };
-  stage_scores?: Array<{ stage?: string; score?: number | null }>;
-  primary_training_focus?: { skill?: string };
-};
-
-function safeReadJson<T>(p: string): T | null {
-  try {
-    return JSON.parse(fs.readFileSync(p, "utf8")) as T;
-  } catch {
-    return null;
-  }
-}
-
-function computeScores(json: AnalyzerJsonLike | null): RowScores | null {
-  if (!json) return null;
-  const stages = json.stage_scores ?? [];
-  const numericScores = stages
-    .map((s) => s.score)
-    .filter((s): s is number => typeof s === "number");
-  const overall =
-    numericScores.length > 0
-      ? Math.round(
-          (numericScores.reduce((a, b) => a + b, 0) / numericScores.length) *
-            10,
-        ) / 10
-      : null;
-  const weak = numericScores.filter((s) => s < 6).length;
-  return {
-    overall_score: overall,
-    weak_stage_count: weak,
-    primary_focus_skill: json.primary_training_focus?.skill ?? "",
-    predicted_bucket: json.predicted_outcome?.bucket ?? "",
-  };
-}
-
-export function listAnalyzedUploads(): DashboardRow[] {
-  const root = getProcessedRoot();
-  if (!fs.existsSync(root)) return [];
-
-  const skillPath = process.env.SKILL_PATH!;
-  const jsonDir = path.join(skillPath, "analyses", "json");
-
-  const entries = fs.readdirSync(root, { withFileTypes: true });
-  const rows: DashboardRow[] = [];
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const uploadId = entry.name;
-    const metadataPath = path.join(root, uploadId, "metadata.json");
-    const metadata = safeReadJson<RowMetadata>(metadataPath);
-    if (!metadata) {
-      console.error(
-        `[dashboard] Skipping ${uploadId}: metadata.json unreadable`,
-      );
-      continue;
-    }
-    if (metadata.status !== "analyzed") continue;
-
-    let scores: RowScores | null = null;
-    if (!metadata.json_parse_error) {
-      const json = safeReadJson<AnalyzerJsonLike>(
-        path.join(jsonDir, `${uploadId}.json`),
-      );
-      scores = computeScores(json);
-    }
-
-    rows.push({ ...metadata, upload_id: uploadId, scores });
-  }
-
-  return rows;
-}
-
 // --- filtering & sorting ----------------------------------------------------
 
 export type SortKey =
@@ -111,8 +48,8 @@ export type SortKey =
   | "score_desc";
 
 export type FilterState = {
-  outcomes: string[]; // empty = no filter
-  rep: string | null;
+  outcomes: string[];
+  rep: string | null; // repUserId (Clerk id) — dropdown values come from Membership lookups
   from: string | null; // YYYY-MM-DD
   to: string | null; // YYYY-MM-DD
   sort: SortKey;
@@ -161,27 +98,173 @@ export function parseFilters(
   return { outcomes, rep, from, to, sort, query };
 }
 
-export function applyFilters(
-  rows: DashboardRow[],
+type ClerkUserMin = {
+  firstName: string | null;
+  lastName: string | null;
+  username: string | null;
+  emailAddresses: { emailAddress: string }[];
+  id: string;
+};
+
+function repDisplayName(u: ClerkUserMin): string {
+  const first = (u.firstName ?? "").trim();
+  const last = (u.lastName ?? "").trim();
+  const full = `${first} ${last}`.trim();
+  if (full) return full;
+  if (u.username?.trim()) return u.username.trim();
+  const email = u.emailAddresses[0]?.emailAddress;
+  return email ?? u.id;
+}
+
+async function batchLookupRepNames(
+  repUserIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (repUserIds.length === 0) return out;
+  try {
+    const client = await clerkClient();
+    const res = await client.users.getUserList({ userId: repUserIds });
+    for (const u of res.data) {
+      out.set(
+        u.id,
+        repDisplayName({
+          firstName: u.firstName,
+          lastName: u.lastName,
+          username: u.username,
+          emailAddresses: u.emailAddresses.map((e) => ({
+            emailAddress: e.emailAddress,
+          })),
+          id: u.id,
+        }),
+      );
+    }
+  } catch (err) {
+    console.error("[dashboard-data] Clerk batch lookup failed:", err);
+  }
+  // Any id Clerk didn't return falls back to the raw id at render
+  // time (callers use map.get(id) ?? id).
+  return out;
+}
+
+/**
+ * Returns DashboardRows for the given orgId, with filters and sort
+ * applied at the Postgres layer (so the result set is already small
+ * by the time we batch-lookup Clerk users for rep names).
+ *
+ * `query` is applied in-memory after Clerk resolution because it
+ * needs to match against the rep DISPLAY name (which lives in Clerk),
+ * not the repUserId. The other filters are pushed to the DB.
+ *
+ * Overload for migration: the legacy 0-arg signature returns [] as
+ * a typecheck-friendly stub so the old dashboard page still compiles
+ * until Step 9 swaps it over to the new signature.
+ */
+export function listAnalyzedUploads(): DashboardRow[];
+export function listAnalyzedUploads(
+  orgId: string,
   filters: FilterState,
-): DashboardRow[] {
-  let out = rows;
+): Promise<DashboardRow[]>;
+export function listAnalyzedUploads(
+  orgId?: string,
+  filters?: FilterState,
+): DashboardRow[] | Promise<DashboardRow[]> {
+  if (!orgId || !filters) return [];
+  return listAnalyzedUploadsImpl(orgId, filters);
+}
+
+async function listAnalyzedUploadsImpl(
+  orgId: string,
+  filters: FilterState,
+): Promise<DashboardRow[]> {
+  // Build the Prisma where clause. status="analyzed" is the only
+  // status with a corresponding Analysis row; other statuses are
+  // skipped from the dashboard.
+  const where: Prisma.UploadWhereInput = {
+    orgId,
+    status: "analyzed",
+  };
   if (filters.outcomes.length > 0) {
-    const set = new Set(filters.outcomes);
-    out = out.filter((r) => set.has(r.outcome));
+    where.outcome = { in: filters.outcomes };
   }
   if (filters.rep) {
-    out = out.filter((r) => r.rep === filters.rep);
+    where.repUserId = filters.rep;
   }
-  if (filters.from) {
-    out = out.filter((r) => r.consultation_date >= filters.from!);
+  if (filters.from || filters.to) {
+    const range: { gte?: Date; lte?: Date } = {};
+    if (filters.from) range.gte = new Date(`${filters.from}T00:00:00Z`);
+    if (filters.to) range.lte = new Date(`${filters.to}T23:59:59.999Z`);
+    where.consultationDate = range;
   }
-  if (filters.to) {
-    out = out.filter((r) => r.consultation_date <= filters.to!);
+
+  // Sort. score_* sorts on Analysis.overallScore — rows with null
+  // overallScore (parse-error rows) sort to the bottom regardless of
+  // direction.
+  let orderBy: Prisma.UploadOrderByWithRelationInput[];
+  switch (filters.sort) {
+    case "consultation_desc":
+      orderBy = [{ consultationDate: "desc" }, { id: "desc" }];
+      break;
+    case "score_asc":
+      orderBy = [
+        { analysis: { overallScore: { sort: "asc", nulls: "last" } } },
+        { id: "desc" },
+      ];
+      break;
+    case "score_desc":
+      orderBy = [
+        { analysis: { overallScore: { sort: "desc", nulls: "last" } } },
+        { id: "desc" },
+      ];
+      break;
+    case "analyzed_desc":
+    default:
+      orderBy = [
+        { analysis: { analyzedAt: { sort: "desc", nulls: "last" } } },
+        { id: "desc" },
+      ];
+      break;
   }
+
+  const rows = await prisma.upload.findMany({
+    where,
+    orderBy,
+    include: {
+      org: true,
+      analysis: true,
+    },
+  });
+
+  // Batch Clerk lookup over unique reps. Single API call regardless
+  // of how many rows the dashboard renders.
+  const uniqueReps = Array.from(new Set(rows.map((r) => r.repUserId)));
+  const repNames = await batchLookupRepNames(uniqueReps);
+
+  const out: DashboardRow[] = rows.map((row) => {
+    const a = row.analysis;
+    return {
+      upload_id: row.id,
+      rep: repNames.get(row.repUserId) ?? row.repUserId,
+      gym: row.org.name,
+      prospect: row.prospectName,
+      consultation_date: row.consultationDate.toISOString().slice(0, 10),
+      outcome: row.outcome,
+      status: row.status,
+      analyzed_at: a?.analyzedAt?.toISOString(),
+      json_parse_error: a?.jsonParseError ?? undefined,
+      scores: a && !a.jsonParseError
+        ? {
+            overall_score: a.overallScore ?? null,
+            weak_stage_count: a.weakStageCount ?? 0,
+            primary_focus_skill: a.primaryTrainingFocus ?? "",
+            predicted_bucket: a.predictedOutcome ?? "",
+          }
+        : null,
+    };
+  });
+
   if (filters.query) {
     const q = filters.query.toLowerCase();
-    out = out.filter((r) => {
+    return out.filter((r) => {
       return (
         r.prospect.toLowerCase().includes(q) ||
         r.rep.toLowerCase().includes(q) ||
@@ -190,41 +273,54 @@ export function applyFilters(
       );
     });
   }
+  return out;
+}
 
-  const sorted = [...out];
-  switch (filters.sort) {
-    case "consultation_desc":
-      sorted.sort((a, b) =>
-        b.consultation_date.localeCompare(a.consultation_date),
-      );
-      break;
-    case "score_asc":
-      // Parse-error rows (no scores) sort to the bottom.
-      sorted.sort((a, b) => {
-        const aScore = a.scores?.overall_score;
-        const bScore = b.scores?.overall_score;
-        if (aScore == null && bScore == null) return 0;
-        if (aScore == null) return 1;
-        if (bScore == null) return -1;
-        return aScore - bScore;
-      });
-      break;
-    case "score_desc":
-      sorted.sort((a, b) => {
-        const aScore = a.scores?.overall_score;
-        const bScore = b.scores?.overall_score;
-        if (aScore == null && bScore == null) return 0;
-        if (aScore == null) return 1;
-        if (bScore == null) return -1;
-        return bScore - aScore;
-      });
-      break;
-    case "analyzed_desc":
-    default:
-      sorted.sort((a, b) =>
-        (b.analyzed_at ?? "").localeCompare(a.analyzed_at ?? ""),
-      );
-      break;
-  }
-  return sorted;
+/**
+ * @deprecated Migration shim — filters are pushed to the DB layer
+ * now. Step 9 removes the dashboard page's reliance on this function.
+ */
+export function applyFilters(
+  rows: DashboardRow[],
+  _filters: FilterState,
+): DashboardRow[] {
+  return rows;
+}
+
+/**
+ * Helper for the dashboard page: resolves the caller's orgId via
+ * Clerk auth + Postgres membership. Returns null if the caller is
+ * unauthenticated or has no memberships — the dashboard page treats
+ * either as "show empty state, no rows to display".
+ */
+export async function resolveCallerOrgId(): Promise<string | null> {
+  const { userId } = await auth();
+  if (!userId) return null;
+  const m = await prisma.membership.findFirst({
+    where: { userId },
+    select: { orgId: true },
+  });
+  return m?.orgId ?? null;
+}
+
+/**
+ * Returns the list of rep dropdown options for the org: every
+ * Membership in the org, resolved to a display name via batched
+ * Clerk lookup. Sorted alphabetically.
+ */
+export async function listOrgReps(
+  orgId: string,
+): Promise<Array<{ userId: string; name: string }>> {
+  const memberships = await prisma.membership.findMany({
+    where: { orgId },
+    select: { userId: true },
+  });
+  const ids = memberships.map((m) => m.userId);
+  const names = await batchLookupRepNames(ids);
+  const list = ids.map((id) => ({
+    userId: id,
+    name: names.get(id) ?? id,
+  }));
+  list.sort((a, b) => a.name.localeCompare(b.name));
+  return list;
 }
