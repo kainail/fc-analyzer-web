@@ -1,42 +1,43 @@
 /**
  * Analyzer integration: FC Sales Analyzer skill against a transcript.
  *
- * Cost notes (as of 2026-05-15, Sonnet 4.6):
+ * Now Postgres + R2 backed. Reads the transcript from R2 via the
+ * Transcript row's textR2Key, runs the Claude call (unchanged), and
+ * writes analysis.json + coaching.md back to R2. An Analysis row in
+ * Postgres records the R2 keys plus denormalized fields the
+ * dashboard needs (overallScore, weakStageCount, primaryTrainingFocus,
+ * predictedOutcome, predictedConfidence, analyzerVersion, jsonParseError).
+ *
+ * Cost notes (Sonnet 4.6):
  *   - Full skill (SKILL.md + methodology + rubric + schema) is ~30-50K
- *     input tokens. With prompt caching, repeat calls within the 5-minute
+ *     input tokens. With prompt caching, repeat calls within the 5-min
  *     window drop the cached portion to ~10% of normal input cost.
  *   - Output budget is 16000 tokens — large analyses + coaching message
  *     can exceed 4096 (calibration runs got truncated at the default).
  *   - Per-analysis ballpark: ~$0.15-0.25 cold, ~$0.03-0.05 cache-hit.
  *
- * Write order on success is INTENTIONAL:
- *   1. analyses/json/<id>.json
- *   2. analyses/coaching/<id>.md
- *   3. Move incoming/<id>/ → processed/<id>/
- *   4. ONLY THEN write metadata.json with status="analyzed"
+ * On API failure: Upload.status="error_analysis", errorMessage, errorAt.
+ * On malformed analyzer JSON: pipeline does NOT fail — the raw output
+ * is written to coaching.md, the analysis.json file is a parse-error
+ * envelope, the Analysis row's jsonParseError is set, and the Upload
+ * row's status still moves to "analyzed". The viewer surfaces the
+ * malformed state and offers a re-run.
  *
- * This guarantees status="analyzed" never appears unless both output
- * files exist and the folder has been moved. The final metadata write
- * goes to the new processed/<id>/metadata.json location.
- *
- * On API error: status="error_analysis", folder stays in incoming/ for
- * inspection. On malformed analyzer JSON: pipeline does NOT fail — raw
- * output is captured, metadata flagged with json_parse_error, status
- * still moves to "analyzed", folder still moves to processed/.
- *
- * This function never throws. All errors are logged via console.error
- * AND recorded in metadata.json.
+ * This function never throws. SKILL_PATH is still required for
+ * loadSkill() — the skill files (SKILL.md + methodology/ + rubric/
+ * + schema/) live on disk because they're checked into the repo as
+ * source-controlled assets, not per-tenant content.
  */
-import fs from "node:fs";
-import path from "node:path";
 import { APIError } from "@anthropic-ai/sdk";
 import { anthropic, MODEL } from "@/lib/anthropic";
 import { loadSkill } from "@/lib/skill-loader";
+import { prisma } from "@/lib/db";
 import {
-  resolveUploadDir,
-  uploadDir,
-  processedDir,
-} from "@/lib/upload-id";
+  downloadFromR2,
+  uploadToR2,
+  analysisJsonKey,
+  coachingKey,
+} from "@/lib/r2";
 
 const MAX_TOKENS = 16000;
 
@@ -45,67 +46,10 @@ const JSON_END = "===ANALYZER_JSON_END===";
 const COACHING_START = "===COACHING_MESSAGE_START===";
 const COACHING_END = "===COACHING_MESSAGE_END===";
 
-type Metadata = Record<string, unknown> & {
-  upload_id: string;
-  status: string;
-};
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function readMetadata(metadataPath: string): Metadata | null {
-  try {
-    return JSON.parse(fs.readFileSync(metadataPath, "utf8")) as Metadata;
-  } catch {
-    return null;
-  }
-}
-
-function writeMetadata(metadataPath: string, metadata: Metadata): void {
-  fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-}
-
-function tryWriteErrorMetadata(
-  metadataPath: string,
-  metadata: Metadata,
-  errorMessage: string,
-  uploadId: string,
-): void {
-  metadata.status = "error_analysis";
-  metadata.error_message = errorMessage;
-  metadata.error_at = nowIso();
-  try {
-    writeMetadata(metadataPath, metadata);
-  } catch (writeErr) {
-    console.error(
-      `[analyze] Failed to write error metadata for ${uploadId}:`,
-      writeErr,
-    );
-  }
-}
-
-function ensureDir(p: string): void {
-  fs.mkdirSync(p, { recursive: true });
-}
-
-function analysesPaths(uploadId: string): {
-  jsonPath: string;
-  coachingPath: string;
-} {
-  const skillPath = process.env.SKILL_PATH;
-  if (!skillPath) {
-    throw new Error("SKILL_PATH is not set");
-  }
-  const jsonDir = path.join(skillPath, "analyses", "json");
-  const coachingDir = path.join(skillPath, "analyses", "coaching");
-  ensureDir(jsonDir);
-  ensureDir(coachingDir);
-  return {
-    jsonPath: path.join(jsonDir, `${uploadId}.json`),
-    coachingPath: path.join(coachingDir, `${uploadId}.md`),
-  };
-}
+// Pulled from the skill's SKILL.md "Calibration status" header. The
+// skill bumps this when the rubric meaningfully changes; we capture
+// it on each Analysis row for filterability across versions.
+const ANALYZER_VERSION = "1.0.0";
 
 function extractBetween(
   text: string,
@@ -137,8 +81,8 @@ function parseAnalyzerResponse(text: string): ParseResult {
   const jsonRaw = extractBetween(text, JSON_START, JSON_END);
   const coachingRaw = extractBetween(text, COACHING_START, COACHING_END);
 
-  // Coaching fallback: if marker missing, fall back to whole text so a
-  // human can still read what came back.
+  // Coaching fallback: if marker missing, fall back to whole text so
+  // a human can still read what came back.
   const coaching = coachingRaw ?? text;
 
   if (jsonRaw === null) {
@@ -203,60 +147,103 @@ function buildSystemPrompt(): Array<{
   ];
 }
 
-export async function analyzeUpload(uploadId: string): Promise<void> {
-  const dir = resolveUploadDir(uploadId);
-  if (!dir) {
-    console.error(
-      `[analyze] No upload directory found for ${uploadId} — aborting`,
-    );
-    return;
-  }
-  const metadataPath = path.join(dir, "metadata.json");
-
-  const metadata = readMetadata(metadataPath);
-  if (!metadata) {
-    console.error(
-      `[analyze] No metadata.json at ${metadataPath} — aborting analysis for ${uploadId}`,
-    );
-    return;
-  }
-
-  if (metadata.status !== "transcribed") {
-    console.warn(
-      `[analyze] Skipping ${uploadId}: expected status="transcribed", got "${metadata.status}"`,
-    );
-    return;
-  }
-
-  const transcriptPath = path.join(dir, "transcript.txt");
-  let transcript: string;
+async function writeUploadError(
+  uploadId: string,
+  message: string,
+): Promise<void> {
   try {
-    transcript = fs.readFileSync(transcriptPath, "utf8");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    tryWriteErrorMetadata(
-      metadataPath,
-      metadata,
-      `Failed to read transcript.txt: ${msg}`,
-      uploadId,
-    );
-    return;
-  }
-
-  // Move status to "analyzing".
-  metadata.status = "analyzing";
-  try {
-    writeMetadata(metadataPath, metadata);
+    await prisma.upload.update({
+      where: { id: uploadId },
+      data: {
+        status: "error_analysis",
+        errorMessage: message,
+        errorAt: new Date(),
+      },
+    });
   } catch (writeErr) {
     console.error(
-      `[analyze] Failed to write 'analyzing' status for ${uploadId}:`,
+      `[analyze] ${uploadId}: Failed to write error status to Postgres:`,
       writeErr,
     );
-    return;
   }
+}
 
-  let failingStep = "build system prompt";
+// Pull the dashboard-facing summary fields out of the parsed analyzer
+// JSON. Defensive — every accessor is optional because the schema
+// occasionally evolves and we don't want one missing field to wipe
+// the whole row.
+function summarizeAnalyzerJson(json: unknown): {
+  overallScore: number | null;
+  weakStageCount: number | null;
+  primaryTrainingFocus: string | null;
+  predictedOutcome: string | null;
+  predictedConfidence: string | null;
+} {
+  const j = (json ?? {}) as Record<string, unknown>;
+  const stages = Array.isArray(j.stage_scores)
+    ? (j.stage_scores as Array<{ score?: number | null }>)
+    : [];
+  const numeric = stages
+    .map((s) => s?.score)
+    .filter((s): s is number => typeof s === "number");
+  const overall =
+    numeric.length > 0
+      ? Math.round((numeric.reduce((a, b) => a + b, 0) / numeric.length) * 10) /
+        10
+      : null;
+  const weak = numeric.filter((s) => s < 6).length;
+
+  const focus = (j.primary_training_focus ?? null) as
+    | { skill?: string }
+    | null;
+  const predicted = (j.predicted_outcome ?? null) as
+    | { bucket?: string; confidence?: string }
+    | null;
+
+  return {
+    overallScore: overall,
+    weakStageCount: numeric.length > 0 ? weak : null,
+    primaryTrainingFocus: focus?.skill ?? null,
+    predictedOutcome: predicted?.bucket ?? null,
+    predictedConfidence: predicted?.confidence ?? null,
+  };
+}
+
+export async function analyzeUpload(uploadId: string): Promise<void> {
+  console.log(`[analyze] ${uploadId}: starting`);
+
+  let failingStep = "load upload + transcript";
   try {
+    const upload = await prisma.upload.findUnique({
+      where: { id: uploadId },
+      include: { org: true, transcript: true },
+    });
+    if (!upload) {
+      console.error(`[analyze] ${uploadId}: no Upload row — aborting`);
+      return;
+    }
+    if (!upload.transcript) {
+      console.error(`[analyze] ${uploadId}: no Transcript row — aborting`);
+      return;
+    }
+    if (upload.status !== "transcribed") {
+      console.warn(
+        `[analyze] ${uploadId}: expected status="transcribed", got "${upload.status}" — skipping`,
+      );
+      return;
+    }
+
+    failingStep = "download transcript from R2";
+    const transcriptBytes = await downloadFromR2(upload.transcript.textR2Key);
+    const transcript = transcriptBytes.toString("utf8");
+
+    failingStep = "status analyzing";
+    await prisma.upload.update({
+      where: { id: uploadId },
+      data: { status: "analyzing" },
+    });
+
+    failingStep = "build system prompt";
     const systemBlocks = buildSystemPrompt();
 
     const userMessage = [
@@ -267,6 +254,7 @@ export async function analyzeUpload(uploadId: string): Promise<void> {
     ].join("\n");
 
     failingStep = "anthropic call";
+    console.log(`[analyze] ${uploadId}: calling Claude`);
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
@@ -277,65 +265,104 @@ export async function analyzeUpload(uploadId: string): Promise<void> {
     const rawText = response.content
       .flatMap((block) => (block.type === "text" ? [block.text] : []))
       .join("\n");
+    console.log(
+      `[analyze] ${uploadId}: Claude returned ${rawText.length} chars`,
+    );
 
     failingStep = "parse analyzer response";
     const parsed = parseAnalyzerResponse(rawText);
 
-    failingStep = "resolve analyses paths";
-    const { jsonPath, coachingPath } = analysesPaths(uploadId);
+    const jsonKey = analysisJsonKey(upload.org.slug, uploadId);
+    const coachKey = coachingKey(upload.org.slug, uploadId);
 
     let jsonParseError: string | null = null;
+    let jsonValueForSummary: unknown = null;
+
     if (parsed.ok) {
-      failingStep = "write json file";
-      fs.writeFileSync(jsonPath, JSON.stringify(parsed.jsonValue, null, 2));
-      failingStep = "write coaching file";
-      fs.writeFileSync(coachingPath, parsed.coaching);
+      failingStep = "upload analysis.json to R2";
+      await uploadToR2(
+        jsonKey,
+        Buffer.from(JSON.stringify(parsed.jsonValue, null, 2), "utf8"),
+        "application/json",
+      );
+      failingStep = "upload coaching.md to R2";
+      await uploadToR2(
+        coachKey,
+        Buffer.from(parsed.coaching, "utf8"),
+        "text/markdown",
+      );
+      jsonValueForSummary = parsed.jsonValue;
     } else {
       jsonParseError = parsed.parseError;
       console.warn(
         `[analyze] ${uploadId}: analyzer output malformed — ${parsed.parseError}`,
       );
-      failingStep = "write json parse-error file";
-      fs.writeFileSync(
-        jsonPath,
-        JSON.stringify(
-          { parse_error: parsed.parseError, raw_response: parsed.rawText },
-          null,
-          2,
+      failingStep = "upload analysis.json parse-error envelope to R2";
+      await uploadToR2(
+        jsonKey,
+        Buffer.from(
+          JSON.stringify(
+            { parse_error: parsed.parseError, raw_response: parsed.rawText },
+            null,
+            2,
+          ),
+          "utf8",
         ),
+        "application/json",
       );
-      failingStep = "write coaching (raw) file";
-      fs.writeFileSync(coachingPath, parsed.coaching);
-    }
-
-    failingStep = "move folder to processed";
-    const incoming = uploadDir(uploadId);
-    const processed = processedDir(uploadId);
-    ensureDir(path.dirname(processed));
-    if (fs.existsSync(processed)) {
-      // Defensive: stale processed entry blocks rename on Windows.
-      throw new Error(
-        `Destination already exists: ${processed} — refusing to overwrite`,
+      failingStep = "upload coaching (raw) to R2";
+      await uploadToR2(
+        coachKey,
+        Buffer.from(parsed.coaching, "utf8"),
+        "text/markdown",
       );
     }
-    fs.renameSync(incoming, processed);
 
-    failingStep = "metadata final write";
-    metadata.status = "analyzed";
-    metadata.analyzed_at = nowIso();
-    if (jsonParseError) {
-      metadata.json_parse_error = jsonParseError;
-    } else {
-      delete metadata.json_parse_error;
-    }
-    metadata.analysis_json_path = jsonPath;
-    metadata.coaching_path = coachingPath;
-    const finalMetadataPath = path.join(processed, "metadata.json");
-    writeMetadata(finalMetadataPath, metadata);
+    failingStep = "persist Analysis row";
+    const summary = summarizeAnalyzerJson(jsonValueForSummary);
+    const now = new Date();
+    await prisma.analysis.upsert({
+      where: { uploadId },
+      create: {
+        uploadId,
+        orgId: upload.orgId,
+        jsonR2Key: jsonKey,
+        coachingR2Key: coachKey,
+        analyzerVersion: ANALYZER_VERSION,
+        overallScore: summary.overallScore ?? undefined,
+        weakStageCount: summary.weakStageCount ?? undefined,
+        primaryTrainingFocus: summary.primaryTrainingFocus ?? undefined,
+        predictedOutcome: summary.predictedOutcome ?? undefined,
+        predictedConfidence: summary.predictedConfidence ?? undefined,
+        jsonParseError: jsonParseError ?? undefined,
+        analyzedAt: now,
+      },
+      update: {
+        jsonR2Key: jsonKey,
+        coachingR2Key: coachKey,
+        analyzerVersion: ANALYZER_VERSION,
+        overallScore: summary.overallScore,
+        weakStageCount: summary.weakStageCount,
+        primaryTrainingFocus: summary.primaryTrainingFocus,
+        predictedOutcome: summary.predictedOutcome,
+        predictedConfidence: summary.predictedConfidence,
+        jsonParseError: jsonParseError,
+        analyzedAt: now,
+      },
+    });
 
-    // Record API usage for cost tracking. Non-critical — log only.
+    failingStep = "status analyzed";
+    await prisma.upload.update({
+      where: { id: uploadId },
+      data: {
+        status: "analyzed",
+        errorMessage: null,
+        errorAt: null,
+      },
+    });
+
     console.log(
-      `[analyze] ${uploadId} done. usage=${JSON.stringify(response.usage)}`,
+      `[analyze] ${uploadId}: done — status=analyzed${jsonParseError ? " (jsonParseError set)" : ""}, usage=${JSON.stringify(response.usage)}`,
     );
   } catch (err) {
     const message =
@@ -345,22 +372,12 @@ export async function analyzeUpload(uploadId: string): Promise<void> {
           ? err.message
           : String(err);
     console.error(
-      `[analyze] Failed at step "${failingStep}" for ${uploadId}:`,
+      `[analyze] ${uploadId}: UNCAUGHT at step "${failingStep}":`,
       err,
     );
-    // Best-effort: write error to whichever metadata path still exists.
-    const stillIncoming = path.join(uploadDir(uploadId), "metadata.json");
-    const inProcessed = path.join(processedDir(uploadId), "metadata.json");
-    const target = fs.existsSync(stillIncoming)
-      ? stillIncoming
-      : fs.existsSync(inProcessed)
-        ? inProcessed
-        : metadataPath;
-    tryWriteErrorMetadata(
-      target,
-      metadata,
-      `Failed at ${failingStep}: ${message}`,
+    await writeUploadError(
       uploadId,
+      `Failed at ${failingStep}: ${message}`,
     );
   }
 }
