@@ -37,7 +37,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${dmSans.variable} ${jetbrainsMono.variable}`}>
+    <html
+      lang="en"
+      data-theme="dark"
+      className={`${dmSans.variable} ${jetbrainsMono.variable}`}
+    >
       <body>
         <div className="app">
           <Sidebar />
