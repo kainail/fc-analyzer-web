@@ -41,4 +41,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-/lib/generated/prisma
+# generated code (Prisma client etc.) — produced by `prisma generate`
+# during the build step, never committed
+/lib/generated/
