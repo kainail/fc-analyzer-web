@@ -8,8 +8,10 @@
 //      process died with no JS error to record the failure.
 
 export async function register() {
+  // SKILL_PATH is intentionally NOT in this list — lib/skill-loader.ts
+  // falls back to the bundled skill/ directory at the repo root when
+  // unset, which is the expected production state.
   const required = [
-    { name: "SKILL_PATH", purpose: "FC_Sales_Analyzer location (upload + analyzer)" },
     { name: "ANTHROPIC_API_KEY", purpose: "Anthropic Messages API (analyzer route)" },
     { name: "OPENAI_API_KEY", purpose: "OpenAI Whisper API (transcription)" },
     { name: "DATABASE_URL", purpose: "Postgres connection (Prisma client)" },

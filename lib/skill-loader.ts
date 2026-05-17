@@ -4,14 +4,15 @@ import path from "node:path";
 const SUBDIRS = ["methodology", "rubric", "schema"] as const;
 
 export function loadSkill(): string {
-  const root = process.env.SKILL_PATH;
-  if (!root) {
-    throw new Error(
-      "SKILL_PATH is not set. Add it to fc-analyzer-web/.env.local — see .env.example.",
-    );
-  }
+  // SKILL_PATH wins in local dev (where the skill is iterated outside
+  // the repo). In production / Railway, the env var is unset and we
+  // fall through to the bundled skill/ directory checked into the
+  // repo root. The bundled copy is the source of truth for deploys.
+  const root = process.env.SKILL_PATH ?? path.join(process.cwd(), "skill");
   if (!fs.existsSync(root)) {
-    throw new Error(`SKILL_PATH directory does not exist: ${root}`);
+    throw new Error(
+      `Skill directory does not exist: ${root}. Set SKILL_PATH or ensure the bundled skill/ folder is present at the repo root.`,
+    );
   }
 
   const sections: string[] = [];

@@ -1,0 +1,272 @@
+{
+  "transcript_id": "2026-01-15-jsmith-sold-2x",
+  "analyzed_at": "2026-01-16T14:23:00Z",
+  "analyzer_version": "1.0.0",
+  "predicted_outcome": {
+    "bucket": "sold-2x",
+    "confidence": "high",
+    "actual_outcome_evident": true,
+    "surface_reasoning": "Prospect signed up for 2x/week training package after the close; rep had recommended 4x but prospect anchored down on financial grounds.",
+    "underlying_cause": "Qualifying was solid through asks and needs, but yesterdays exploration was rushed and the diagram was delivered without specific callbacks to the prospect's stated identity (her daughter's wedding in May). Value communication was therefore flat at the moment that determines frequency choice.",
+    "primary_diagnostic_flags_implicated": ["no_callbacks_to_discovery", "generic_diagram"]
+  },
+  "stage_scores": [
+    {
+      "stage": "pre_frame",
+      "score": 7,
+      "evidence_quotes": [
+        "REP (00:42): 'How's your day been? — I love that you came right after work, takes commitment.' Prospect smiled, sat down. Direct transition into 'so what made you decide to come in today?' at 01:18."
+      ],
+      "what_worked": "Clean opening, brief rapport, direct transition into qualifying within two minutes.",
+      "what_was_missed": "Nothing significant.",
+      "upstream_consequences": null
+    },
+    {
+      "stage": "asks",
+      "score": 7,
+      "evidence_quotes": [
+        "REP (01:30): 'Why now? What made today the day?' PROSPECT: 'My daughter's getting married in May and I want to feel good in the photos.'",
+        "REP (02:15): 'What does feeling good in those photos really mean to you?' PROSPECT: 'I haven't felt like myself in years. I want my daughter to look at those photos and see her mom, not... whoever this is.'"
+      ],
+      "what_worked": "Asked 'why now' explicitly. Pushed past the surface goal (lose weight for the wedding) to the emotional why (identity, recognition by her daughter). Did not stack questions.",
+      "what_was_missed": "No consequence question. 'What happens if nothing changes?' would have surfaced even more urgency from the prospect's own articulation.",
+      "upstream_consequences": "Solid asks gave the rep good material — but the missing consequence question meant the urgency baseline was set by the wedding date alone, not by the broader cost of inaction. This contributed to the 2x outcome (urgency was real but bounded; the prospect wasn't operating from a 'I need to fix this period of my life' frame)."
+    },
+    {
+      "stage": "needs",
+      "score": 8,
+      "evidence_quotes": [
+        "REP (03:50): 'So what I'm hearing is — this isn't really about weight, it's about your daughter recognizing the version of you you used to be when she looks at those wedding photos. Is that right?' PROSPECT: 'Yes. Exactly that.'"
+      ],
+      "what_worked": "Clean label-and-confirm. Reframed 'weight loss' as identity recognition, in the rep's own words. Got explicit verbal agreement before moving on.",
+      "what_was_missed": "Nothing significant. This was the strongest single moment of the call.",
+      "upstream_consequences": "This labeling moment is what carried the rest of the call. The prospect was emotionally committed to a specific framing from this point forward."
+    },
+    {
+      "stage": "yesterdays",
+      "score": 5,
+      "evidence_quotes": [
+        "REP (04:30): 'Have you tried things before?' PROSPECT: 'Oh, lots of times.' REP: 'Cool, what kinds of things?' PROSPECT: 'You know — different diets, the occasional gym membership.' REP: 'Got it, and how'd those go?' PROSPECT: 'They didn't really stick.' REP: 'Mm, that's super common — let me show you something.'"
+      ],
+      "what_worked": "The rep at least asked about past attempts.",
+      "what_was_missed": "Vague yesterdays. No specific past programs surfaced. No durations. No reasons for failure articulated by the prospect. The 'didn't really stick' was accepted without follow-up. The missing-piece reframe was skipped entirely.",
+      "upstream_consequences": "This is the highest-leverage failure of the call. Without specific yesterdays material, the diagram had nothing to callback to. The 'human nature dip' moment landed generically because the prospect had not articulated her own pattern. The price reveal happened against weaker contrast than it could have."
+    },
+    {
+      "stage": "workout",
+      "score": 7,
+      "evidence_quotes": [
+        "Workout was personalized to her shoulder discomfort (mentioned at intake). Rep tied a movement to 'so when you're hugging your grandkids someday this won't pull anymore' which got a laugh and visible engagement."
+      ],
+      "what_worked": "Personalized to her stated weakness. One small future-image moment landed.",
+      "what_was_missed": "The pre-frame for the close at the end of the workout was rushed.",
+      "upstream_consequences": null
+    },
+    {
+      "stage": "pre_frame_guarantees",
+      "score": 5,
+      "evidence_quotes": [
+        "REP (52:00): 'So real quick before I show you the options — we do customized programs, the meal plans, monthly body comp scans, and we have a money-back guarantee.' [moves directly to price sheet]"
+      ],
+      "what_worked": "All four guarantees mentioned.",
+      "what_was_missed": "Guarantees listed as a checklist. No callbacks to specific things the prospect surfaced (her shoulder, the wedding timeline, her past failures). Money-back guarantee glossed in one sentence rather than walked through. Conviction was thin compared to the qualifying section.",
+      "upstream_consequences": null
+    },
+    {
+      "stage": "price_anchor",
+      "score": 6,
+      "evidence_quotes": [
+        "REP (53:15): 'Based on what you told me, I'd recommend 4x/week — that's where we see real transformation. Here are all the options.' [shows sheet]"
+      ],
+      "what_worked": "Explicit anchor at 4x. Recommendation tied (lightly) to qualifying.",
+      "what_was_missed": "The 'based on what you told me' was generic — did not name what the prospect had told the rep. A callback like 'with the wedding in May, 4x is what gets you there' would have anchored the recommendation in something specific.",
+      "upstream_consequences": null
+    },
+    {
+      "stage": "close",
+      "score": 7,
+      "evidence_quotes": [
+        "REP (54:08): 'Ready to get started?' [silence — approximately 6 seconds based on transcript gap]. PROSPECT (54:14): 'Yeah, I think so. The 2x.' REP: 'Great choice for getting started.'"
+      ],
+      "what_worked": "Clean direct ask, held the silence, did not fill the pause.",
+      "what_was_missed": "When prospect chose 2x, rep accepted without reframing or pushing toward the higher anchor. A moment like 'with your wedding in May, 4x will get you there. 2x is more like a 9-month timeline — does that work for your goal?' might have shifted the outcome.",
+      "upstream_consequences": null
+    },
+    {
+      "stage": "reinforce",
+      "score": 7,
+      "evidence_quotes": [
+        "Rep collected EFT cleanly with savings/checking framing. Walked through cancellation policy with a reframe ('you can pause for three months a year — we do this so you actually succeed'). Ended with energy and a high-five."
+      ],
+      "what_worked": "Sign-up was efficient. EFT collected cleanly. Policy reframes used. Energy maintained.",
+      "what_was_missed": "Nothing significant.",
+      "upstream_consequences": null
+    }
+  ],
+  "cross_cutting_scores": [
+    {
+      "dimension": "qualifying_depth",
+      "score": 6,
+      "evidence_quotes": [
+        "Asks went deep (reached emotional why). Yesterdays stayed shallow (no specific past programs surfaced). Average pulls the score to 6."
+      ],
+      "pattern_observed": "Strong on the front half of qualifying, weak on the back half. The rep dug well to find the why but did not dig at all to surface the past pattern.",
+      "highest_leverage_fix": "Treat yesterdays with the same discipline as asks. After the prospect says 'I've tried things before,' ask: 'Like what specifically? How long did you do it? What happened?' Three follow-up questions minimum before moving on."
+    },
+    {
+      "dimension": "identity_contrast",
+      "score": 4,
+      "evidence_quotes": [
+        "The needs stage labeled identity ('the version of you your daughter recognizes'). But yesterdays did not extract a recurring pattern, so the contrast remained one-sided — there was a future image but no concrete present image to contrast it against."
+      ],
+      "pattern_observed": "Future identity established (well). Current/past identity pattern not established. Contrast incomplete.",
+      "highest_leverage_fix": "After getting the emotional why, dig yesterdays specifically to surface the recurring pattern of failure in the prospect's own words. The pattern is the 'who you are now' that contrasts with the future image."
+    },
+    {
+      "dimension": "label_and_confirm",
+      "score": 7,
+      "evidence_quotes": [
+        "One excellent label-and-confirm at minute 3:50. No further labeling for the rest of the call."
+      ],
+      "pattern_observed": "Strong execution at the needs stage but the discipline did not carry through. Subsequent moments where labeling would have helped (after yesterdays, before the diagram, after the workout) all passed without explicit labeling.",
+      "highest_leverage_fix": null
+    },
+    {
+      "dimension": "mirroring_adaptation",
+      "score": 7,
+      "evidence_quotes": [
+        "Rep matched the prospect's pace consistently. When the prospect's voice softened around the daughter topic, rep slowed down and validated. When energy lifted during the workout, rep matched it."
+      ],
+      "pattern_observed": "Good baseline mirroring throughout. Read the prospect's emotional state and adapted accordingly.",
+      "highest_leverage_fix": null
+    },
+    {
+      "dimension": "callback_discipline",
+      "score": 3,
+      "evidence_quotes": [
+        "The prospect surfaced multiple specific details: daughter's wedding in May, shoulder discomfort, identity loss, past failures with diets and gym memberships.",
+        "The diagram (38:00–48:00) used none of these. The future image was generic ('imagine waking up feeling great in six months'). The wedding never came back. The daughter never came back.",
+        "The pre-frame guarantees did not callback to anything specific the prospect had said."
+      ],
+      "pattern_observed": "Discovery treated as a checklist rather than ammunition. Rep collected information correctly but treated it as a discrete stage rather than as material to weave through the rest of the call. This is the highest-leverage fix in the entire call.",
+      "highest_leverage_fix": "After yesterdays, identify 2–3 specific details (a past attempt, an emotional driver, a stated identity moment) and explicitly reference each at least once during the diagram, the guarantees, and the close. The drill should focus on building the habit of reaching back for material rather than producing it generically."
+    },
+    {
+      "dimension": "value_communication",
+      "score": 5,
+      "evidence_quotes": [
+        "The diagram had structure but lacked specific stories or metaphors tied to this prospect. Social proof was used once ('clients training 3-4x per week') but not at the moment of the price anchor.",
+        "No metaphors — no house, no Netflix, no Disneyland — were deployed."
+      ],
+      "pattern_observed": "Value communicated structurally (the 12-month diagram exists) but not viscerally (no stories or metaphors that would make the prospect feel the future).",
+      "highest_leverage_fix": "Pick one specific detail from yesterdays or asks at the start of the diagram and weave it through every phase. The diagram should be unrepeatable — it should work only for this specific person."
+    },
+    {
+      "dimension": "conviction_tone",
+      "score": 7,
+      "evidence_quotes": [
+        "Direct ask at the close, no hedging at the price reveal, silence held."
+      ],
+      "pattern_observed": "Strong conviction during the close. Slight hedging during the pre-frame guarantees (read more like a checklist than a confident walkthrough).",
+      "highest_leverage_fix": null
+    },
+    {
+      "dimension": "momentum_preservation",
+      "score": 7,
+      "evidence_quotes": [
+        "After the prospect said 'yeah, the 2x,' rep moved directly to payment method without re-pitching."
+      ],
+      "pattern_observed": "Clean transition from agreement to logistics.",
+      "highest_leverage_fix": null
+    },
+    {
+      "dimension": "one_question_at_a_time",
+      "score": 8,
+      "evidence_quotes": [
+        "Throughout the call, questions were asked individually with pauses for response. No question stacking observed."
+      ],
+      "pattern_observed": "Disciplined questioning throughout. This is a strength.",
+      "highest_leverage_fix": null
+    }
+  ],
+  "diagnostic_flags": [
+    {
+      "flag": "vague_yesterdays",
+      "evidence_quote": "REP: 'And how'd those go?' PROSPECT: 'They didn't really stick.' REP: 'Mm, that's super common — let me show you something.'",
+      "transcript_location": "Approximately 04:30–05:15",
+      "stage": "yesterdays",
+      "downstream_consequences": ["no_callbacks_to_discovery", "generic_diagram"]
+    },
+    {
+      "flag": "no_callbacks_to_discovery",
+      "evidence_quote": "Diagram results phase (40:00–44:00) painted a generic future image without referencing the wedding, the daughter, the shoulder, or the prospect's pattern of past failures.",
+      "transcript_location": "40:00–44:00",
+      "stage": "pre_frame_guarantees",
+      "downstream_consequences": ["generic_diagram"]
+    },
+    {
+      "flag": "generic_diagram",
+      "evidence_quote": "The 12-month diagram was delivered with general fitness language. No specific reference to the prospect's stated identity. The 'human nature dip' was explained but the prospect was not given the opportunity to articulate her own pattern of past failure.",
+      "transcript_location": "38:00–48:00",
+      "stage": "pre_frame_guarantees",
+      "downstream_consequences": ["settled_for_low_package"]
+    },
+    {
+      "flag": "no_consequence_question",
+      "evidence_quote": "During asks (01:30–04:00), the rep covered status and outcome but did not ask 'what happens if nothing changes?' or any equivalent.",
+      "transcript_location": "01:30–04:00",
+      "stage": "asks",
+      "downstream_consequences": []
+    },
+    {
+      "flag": "settled_for_low_package",
+      "evidence_quote": "PROSPECT: 'Yeah, I think so. The 2x.' REP: 'Great choice for getting started.'",
+      "transcript_location": "54:14",
+      "stage": "close",
+      "downstream_consequences": []
+    }
+  ],
+  "primary_training_focus": {
+    "skill": "Callback discipline during value communication",
+    "stage_or_dimension": "callback_discipline",
+    "specific_weakness": "Rep gathered solid material in asks and needs but did not reference any of it during the diagram, the pre-frame guarantees, or the close. Specific details surfaced (daughter's wedding in May, identity recognition, shoulder issue) were never used. The future image was painted generically — it could have been delivered to any prospect.",
+    "evidence_quotes": [
+      "Diagram (40:00): generic 'imagine waking up six months from now feeling great' rather than 'imagine walking into your daughter's wedding in May feeling like the version of yourself you described.'",
+      "Pre-frame guarantees (52:00): listed as checklist rather than tied to her stated needs (custom workout could have been tied to her shoulder; meal plan could have been tied to her past failure with diets).",
+      "Price anchor (53:15): 'based on what you told me' but did not name what she had told him."
+    ],
+    "why_this_is_the_priority": "Qualifying was strong (7-8 in asks and needs). The leverage point is now using the material that was gathered. Every weakness downstream — the flat diagram, the checklist guarantees, the unanchored recommendation, even the settled-for-2x — traces back to the rep treating discovery as a discrete stage rather than as ongoing ammunition. Fixing this single skill would likely shift outcomes from 2x to 3x or 4x without changing anything else about the call.",
+    "success_criteria": "In the next consultation, the rep references at least 3 specific details from qualifying during the diagram, ties at least one guarantee directly to a prospect's stated need during the pre-frame, and includes a callback during the price anchor recommendation. The future image painted should be specific to that prospect — unrepeatable for anyone else."
+  },
+  "secondary_training_focus": {
+    "skill": "Yesterdays depth (extracting concrete past attempts)",
+    "stage_or_dimension": "yesterdays",
+    "specific_weakness": "Rep accepted 'I've tried things before, they didn't really stick' without follow-up. No specific programs, durations, or reasons for failure surfaced. The missing-piece reframe was skipped.",
+    "evidence_quotes": [
+      "REP: 'And how'd those go?' PROSPECT: 'They didn't really stick.' REP: 'Mm, that's super common — let me show you something.' [transitions to diagram]"
+    ],
+    "why_this_is_the_priority": "Closely related to the primary focus — without specific yesterdays material, the callbacks downstream have nothing to draw on. Fixing yesterdays gives the rep more ammunition; fixing callback discipline teaches them to use it. Both matter, but the primary is downstream-affecting and therefore higher-leverage to drill first.",
+    "success_criteria": "In the next consultation, rep extracts at least 2 specific past attempts with names, durations, and reasons for failure articulated by the prospect. Reframe is delivered explicitly ('it wasn't your fault — you were missing a piece')."
+  },
+  "roleplay_scenario_seed": {
+    "prospect_profile": {
+      "demographic": "Female, mid 40s, mother of adult children, mild past gym experience",
+      "stated_surface_goal": "I want to look good in some upcoming family photos",
+      "actual_emotional_driver": "Has lost a sense of identity over the past several years and wants her family to recognize her again",
+      "yesterdays_pattern": "Three past attempts at fitness over the last decade — Weight Watchers in 2019 (lasted 4 months), Planet Fitness in 2021 (lasted 6 weeks), Peloton purchase in 2022 (still owns, rarely uses). Each time abandoned due to inconsistency once initial motivation faded.",
+      "objection_likely": "Will choose a lower frequency package than recommended unless rep callbacks effectively during the diagram and price anchor",
+      "personality_signals": "Warm, talkative, opens up readily once she feels heard — but will give surface-level answers if the rep moves too fast"
+    },
+    "stage_to_drill_enum": "callback_discipline",
+    "drill_scope_description": "Callback discipline across the diagram, pre-frame guarantees, and price anchor",
+    "drill_focus": "Treating qualifying material as ammunition. After yesterdays, the rep names 2–3 specific details internally and commits to referencing each at least once during the diagram, the guarantees, and the recommendation.",
+    "difficulty_modifiers": [
+      "Prospect provides specific details only if dug for; otherwise she stays surface-level",
+      "Prospect's anchor is on financial pacing — she will default to 2x unless given a specific reason tied to her own situation to choose 4x",
+      "Prospect notices generic future-imagery and visibly disengages when delivered"
+    ],
+    "success_definition": "In the drill, the rep references at least 3 specific details from qualifying during the value communication phase. The diagram includes at least one specific story tied to the prospect (not generic). The price anchor recommendation explicitly names a detail from qualifying. The rep does not let the prospect settle for a lower frequency without one specific reframe attempt.",
+    "estimated_drill_duration_minutes": 15
+  },
+  "overall_assessment": "A solid consultation that closed at 2x but had a 4x outcome on the table. The rep qualified well in the front half — the asks dig was patient, the needs labeling was textbook, and the prospect verbally committed to an emotional framing at minute 3:50. From that point on, however, the discovery material was effectively orphaned. Yesterdays was rushed. The diagram was delivered without specific callbacks. The pre-frame guarantees were a checklist rather than a tailored walkthrough. The price anchor at 4x was correct, but the recommendation was not anchored in anything specific the prospect had said. When she chose 2x, the rep accepted without reframing. None of these are catastrophic individually — the call still closed — but together they describe a rep who has learned the structure of consultation but not yet the discipline of using the material the structure produces. The single training focus that would shift this rep's results most: callback discipline. Drill the habit of reaching back for material rather than producing it generically."
+}
