@@ -1,6 +1,16 @@
+// Upload-id helpers + Postgres lookup for an Upload row.
+//
+// The old filesystem helpers (uploadDir, processedDir, resolveUploadDir,
+// getIncomingRoot, getProcessedRoot) used to read from disk. They're
+// preserved here as TYPE-COMPATIBLE THROW STUBS so the rest of the
+// codebase still typechecks during the multi-step migration — every
+// caller will be migrated to getUploadById() in subsequent steps,
+// and the stubs disappear in Step 12 cleanup. Calling any of them at
+// runtime is now a programmer error.
+
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
+import { prisma } from "@/lib/db";
+import type { UploadModel } from "@/lib/generated/prisma/models/Upload";
 
 export const ALLOWED_AUDIO_EXTENSIONS = [
   "mp3",
@@ -29,54 +39,70 @@ export function repSlug(rep: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function getIncomingRoot(): string {
-  const skillPath = process.env.SKILL_PATH;
-  if (!skillPath) {
-    throw new Error("SKILL_PATH is not set");
-  }
-  return path.join(skillPath, "transcripts", "incoming");
+// Returns the Upload row (or null if no such row exists). The
+// canonical lookup for every code path that used to walk
+// SKILL_PATH/transcripts/incoming/ or .../processed/.
+export async function getUploadById(
+  uploadId: string,
+): Promise<UploadModel | null> {
+  return prisma.upload.findUnique({ where: { id: uploadId } });
 }
 
-export function getProcessedRoot(): string {
-  const skillPath = process.env.SKILL_PATH;
-  if (!skillPath) {
-    throw new Error("SKILL_PATH is not set");
-  }
-  return path.join(skillPath, "transcripts", "processed");
-}
-
-export function uploadDir(uploadId: string): string {
-  return path.join(getIncomingRoot(), uploadId);
-}
-
-export function processedDir(uploadId: string): string {
-  return path.join(getProcessedRoot(), uploadId);
-}
-
-// Finds the upload folder in either incoming/ or processed/. Returns
-// null if neither exists. Used by status reads and the analyzer
-// re-trigger route so callers don't need to know where a given upload
-// currently lives in the pipeline.
-export function resolveUploadDir(uploadId: string): string | null {
-  const incoming = uploadDir(uploadId);
-  if (fs.existsSync(incoming)) return incoming;
-  const processed = processedDir(uploadId);
-  if (fs.existsSync(processed)) return processed;
-  return null;
-}
-
-export function generateUniqueUploadId(opts: {
+// Format: YYYY-MM-DD-<rep-slug>-<outcome>-<4 hex>. The hex suffix
+// reduces collision probability to ~1 in 65k per (date, rep, outcome)
+// triple; the Upload.id primary-key constraint catches the rest as
+// an insert-time error.
+export function generateUploadId(opts: {
   consultationDate: string;
   rep: string;
   outcome: string;
 }): string {
   const base = `${opts.consultationDate}-${repSlug(opts.rep)}-${opts.outcome}`;
-  for (let i = 0; i < 5; i++) {
-    const random = crypto.randomBytes(2).toString("hex");
-    const id = `${base}-${random}`;
-    if (!fs.existsSync(uploadDir(id))) {
-      return id;
-    }
-  }
-  throw new Error("Could not generate a unique upload_id after 5 attempts");
+  const random = crypto.randomBytes(2).toString("hex");
+  return `${base}-${random}`;
+}
+
+/** @deprecated Use generateUploadId — the old name returned an id
+ *  guaranteed unique against the local filesystem, which the new
+ *  Postgres-backed model handles via PK constraint instead. */
+export function generateUniqueUploadId(opts: {
+  consultationDate: string;
+  rep: string;
+  outcome: string;
+}): string {
+  return generateUploadId(opts);
+}
+
+// --- Filesystem helper THROW STUBS ------------------------------------------
+// These exist only to keep TypeScript happy across the multi-step
+// migration. Every caller is migrated to getUploadById() / direct R2
+// keys in subsequent steps; once nothing references these names,
+// Step 12 deletes them.
+
+const STUB_MSG =
+  "Filesystem upload-id helpers are no longer supported — use getUploadById() and Upload.audioR2Key / transcriptR2Key / etc.";
+
+/** @deprecated migration stub — will throw at runtime */
+export function getIncomingRoot(): string {
+  throw new Error(STUB_MSG);
+}
+
+/** @deprecated migration stub — will throw at runtime */
+export function getProcessedRoot(): string {
+  throw new Error(STUB_MSG);
+}
+
+/** @deprecated migration stub — will throw at runtime */
+export function uploadDir(_uploadId: string): string {
+  throw new Error(STUB_MSG);
+}
+
+/** @deprecated migration stub — will throw at runtime */
+export function processedDir(_uploadId: string): string {
+  throw new Error(STUB_MSG);
+}
+
+/** @deprecated migration stub — will throw at runtime */
+export function resolveUploadDir(_uploadId: string): string | null {
+  throw new Error(STUB_MSG);
 }
