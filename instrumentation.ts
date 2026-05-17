@@ -12,6 +12,13 @@ export async function register() {
     { name: "SKILL_PATH", purpose: "FC_Sales_Analyzer location (upload + analyzer)" },
     { name: "ANTHROPIC_API_KEY", purpose: "Anthropic Messages API (analyzer route)" },
     { name: "OPENAI_API_KEY", purpose: "OpenAI Whisper API (transcription)" },
+    { name: "DATABASE_URL", purpose: "Postgres connection (Prisma client)" },
+    { name: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", purpose: "Clerk frontend (sign-in / sign-up widgets)" },
+    { name: "CLERK_SECRET_KEY", purpose: "Clerk backend (auth() / middleware)" },
+    { name: "R2_ENDPOINT", purpose: "Cloudflare R2 S3 endpoint" },
+    { name: "R2_BUCKET", purpose: "Cloudflare R2 bucket name" },
+    { name: "R2_ACCESS_KEY_ID", purpose: "Cloudflare R2 access key" },
+    { name: "R2_SECRET_ACCESS_KEY", purpose: "Cloudflare R2 secret" },
   ];
 
   const missing = required.filter(({ name }) => !process.env[name]);
