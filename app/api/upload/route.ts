@@ -24,7 +24,7 @@ import { prisma } from "@/lib/db";
 import { uploadToR2, audioKey } from "@/lib/r2";
 import { transcribeUpload } from "@/lib/transcribe";
 import {
-  generateUniqueUploadId,
+  generateUploadId,
   isAllowedAudioExtension,
   extensionFromFilename,
   ALLOWED_AUDIO_EXTENSIONS,
@@ -195,7 +195,7 @@ export async function POST(request: Request) {
         return;
       }
 
-      uploadId = generateUniqueUploadId({
+      uploadId = generateUploadId({
         consultationDate: fields.consultation_date!,
         rep: repName,
         outcome: fields.outcome!,

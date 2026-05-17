@@ -1,9 +1,6 @@
-import { getReps, getGyms } from "@/lib/config";
 import UploadForm from "./upload-form";
 
 export default function Page() {
-  const reps = getReps();
-  const gyms = getGyms();
   return (
     <div className="content narrow">
       <div className="page-head">
@@ -14,7 +11,7 @@ export default function Page() {
           </div>
         </div>
       </div>
-      <UploadForm reps={reps} gyms={gyms} />
+      <UploadForm />
     </div>
   );
 }

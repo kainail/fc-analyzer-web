@@ -14,10 +14,9 @@ import {
   X,
 } from "@/lib/icons";
 
-type Props = {
-  reps: string[];
-  gyms: string[];
-};
+// No props — rep comes from the authenticated Clerk user, gym from
+// their Organization. The pre-migration freeform dropdowns are gone.
+type Props = Record<string, never>;
 
 const MAX_BYTES = 100 * 1024 * 1024;
 const ALLOWED_EXT = ["mp3", "m4a", "wav", "ogg", "aac", "flac"];
@@ -30,11 +29,9 @@ function todayIso(): string {
   return `${y}-${m}-${day}`;
 }
 
-export default function UploadForm({ reps, gyms }: Props) {
+export default function UploadForm(_props: Props) {
   const router = useRouter();
 
-  const [rep, setRep] = useState("");
-  const [gym, setGym] = useState(gyms[0] ?? "");
   const [prospect, setProspect] = useState("");
   const [consultationDate, setConsultationDate] = useState(todayIso());
   const [outcome, setOutcome] = useState("");
@@ -79,8 +76,6 @@ export default function UploadForm({ reps, gyms }: Props) {
   }
 
   function firstMissing(): string | null {
-    if (!rep) return "Rep is required";
-    if (!gym) return "Gym is required";
     if (!prospect.trim()) return "Prospect is required";
     if (!consultationDate) return "Consultation date is required";
     if (!outcome) return "Outcome is required";
@@ -99,8 +94,6 @@ export default function UploadForm({ reps, gyms }: Props) {
     }
 
     const fd = new FormData();
-    fd.append("rep", rep);
-    fd.append("gym", gym);
     fd.append("prospect", prospect.trim());
     fd.append("consultation_date", consultationDate);
     fd.append("outcome", outcome);
@@ -161,50 +154,6 @@ export default function UploadForm({ reps, gyms }: Props) {
             gap: 16,
           }}
         >
-          <div className="field">
-            <label className="label" htmlFor="rep">
-              Rep <span className="req">*</span>
-            </label>
-            <select
-              id="rep"
-              className="select"
-              value={rep}
-              onChange={(e) => setRep(e.target.value)}
-              disabled={uploading}
-            >
-              <option value="" disabled>
-                Select rep…
-              </option>
-              {reps.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label className="label" htmlFor="gym">
-              Gym <span className="req">*</span>
-            </label>
-            <select
-              id="gym"
-              className="select"
-              value={gym}
-              onChange={(e) => setGym(e.target.value)}
-              disabled={uploading}
-            >
-              <option value="" disabled>
-                Select gym…
-              </option>
-              {gyms.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <div className="field" style={{ gridColumn: "1 / -1" }}>
             <label className="label" htmlFor="prospect">
               Prospect name <span className="req">*</span>

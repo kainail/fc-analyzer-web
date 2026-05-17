@@ -1,5 +1,17 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Required environment
+
+Set in `.env.local` (see `.env.example`):
+
+- **Postgres**: `DATABASE_URL` — Railway connection string. Prisma client reads it via `@prisma/adapter-pg`.
+- **Clerk**: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` — auth + membership.
+- **Cloudflare R2**: `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` — object storage for audio + transcripts + analyses.
+- **OpenAI**: `OPENAI_API_KEY` — Whisper transcription.
+- **Anthropic**: `ANTHROPIC_API_KEY` — Claude analyzer.
+- **`SKILL_PATH`** — local absolute path to the FC_Sales_Analyzer skill folder (`SKILL.md` + `methodology/` + `rubric/` + `schema/`). Still required: the analyzer loads the rubric/methodology/schema files from disk because they're version-controlled assets, not per-tenant content. Uploads, transcripts, and analyses themselves all live in Postgres + R2 now — SKILL_PATH no longer participates in the pipeline's write path.
+- **Optional**: `FFMPEG_PATH` — override the ffmpeg binary location (defaults to PATH lookup, then a hardcoded Windows fallback). `ffmpeg` is required for transcribing recordings >25 MB.
+
 ## Getting Started
 
 First, run the development server:

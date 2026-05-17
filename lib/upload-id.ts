@@ -1,12 +1,10 @@
 // Upload-id helpers + Postgres lookup for an Upload row.
 //
-// The old filesystem helpers (uploadDir, processedDir, resolveUploadDir,
-// getIncomingRoot, getProcessedRoot) used to read from disk. They're
-// preserved here as TYPE-COMPATIBLE THROW STUBS so the rest of the
-// codebase still typechecks during the multi-step migration — every
-// caller will be migrated to getUploadById() in subsequent steps,
-// and the stubs disappear in Step 12 cleanup. Calling any of them at
-// runtime is now a programmer error.
+// The pre-migration filesystem helpers (uploadDir, processedDir,
+// resolveUploadDir, getIncomingRoot, getProcessedRoot) and the
+// generateUniqueUploadId alias are gone — every caller is on the
+// Postgres-backed getUploadById() and the cleaner generateUploadId
+// factory now.
 
 import crypto from "node:crypto";
 import { prisma } from "@/lib/db";
@@ -40,8 +38,7 @@ export function repSlug(rep: string): string {
 }
 
 // Returns the Upload row (or null if no such row exists). The
-// canonical lookup for every code path that used to walk
-// SKILL_PATH/transcripts/incoming/ or .../processed/.
+// canonical lookup for code paths that need the full row by id.
 export async function getUploadById(
   uploadId: string,
 ): Promise<UploadModel | null> {
@@ -60,49 +57,4 @@ export function generateUploadId(opts: {
   const base = `${opts.consultationDate}-${repSlug(opts.rep)}-${opts.outcome}`;
   const random = crypto.randomBytes(2).toString("hex");
   return `${base}-${random}`;
-}
-
-/** @deprecated Use generateUploadId — the old name returned an id
- *  guaranteed unique against the local filesystem, which the new
- *  Postgres-backed model handles via PK constraint instead. */
-export function generateUniqueUploadId(opts: {
-  consultationDate: string;
-  rep: string;
-  outcome: string;
-}): string {
-  return generateUploadId(opts);
-}
-
-// --- Filesystem helper THROW STUBS ------------------------------------------
-// These exist only to keep TypeScript happy across the multi-step
-// migration. Every caller is migrated to getUploadById() / direct R2
-// keys in subsequent steps; once nothing references these names,
-// Step 12 deletes them.
-
-const STUB_MSG =
-  "Filesystem upload-id helpers are no longer supported — use getUploadById() and Upload.audioR2Key / transcriptR2Key / etc.";
-
-/** @deprecated migration stub — will throw at runtime */
-export function getIncomingRoot(): string {
-  throw new Error(STUB_MSG);
-}
-
-/** @deprecated migration stub — will throw at runtime */
-export function getProcessedRoot(): string {
-  throw new Error(STUB_MSG);
-}
-
-/** @deprecated migration stub — will throw at runtime */
-export function uploadDir(_uploadId: string): string {
-  throw new Error(STUB_MSG);
-}
-
-/** @deprecated migration stub — will throw at runtime */
-export function processedDir(_uploadId: string): string {
-  throw new Error(STUB_MSG);
-}
-
-/** @deprecated migration stub — will throw at runtime */
-export function resolveUploadDir(_uploadId: string): string | null {
-  throw new Error(STUB_MSG);
 }

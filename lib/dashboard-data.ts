@@ -154,25 +154,8 @@ async function batchLookupRepNames(
  * `query` is applied in-memory after Clerk resolution because it
  * needs to match against the rep DISPLAY name (which lives in Clerk),
  * not the repUserId. The other filters are pushed to the DB.
- *
- * Overload for migration: the legacy 0-arg signature returns [] as
- * a typecheck-friendly stub so the old dashboard page still compiles
- * until Step 9 swaps it over to the new signature.
  */
-export function listAnalyzedUploads(): DashboardRow[];
-export function listAnalyzedUploads(
-  orgId: string,
-  filters: FilterState,
-): Promise<DashboardRow[]>;
-export function listAnalyzedUploads(
-  orgId?: string,
-  filters?: FilterState,
-): DashboardRow[] | Promise<DashboardRow[]> {
-  if (!orgId || !filters) return [];
-  return listAnalyzedUploadsImpl(orgId, filters);
-}
-
-async function listAnalyzedUploadsImpl(
+export async function listAnalyzedUploads(
   orgId: string,
   filters: FilterState,
 ): Promise<DashboardRow[]> {
@@ -274,17 +257,6 @@ async function listAnalyzedUploadsImpl(
     });
   }
   return out;
-}
-
-/**
- * @deprecated Migration shim — filters are pushed to the DB layer
- * now. Step 9 removes the dashboard page's reliance on this function.
- */
-export function applyFilters(
-  rows: DashboardRow[],
-  _filters: FilterState,
-): DashboardRow[] {
-  return rows;
 }
 
 /**
