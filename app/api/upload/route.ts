@@ -1,16 +1,34 @@
+/**
+ * Audio upload route — multitenant.
+ *
+ * Auth: Clerk userId from auth(); 401 if missing. The user must have
+ * a Membership row in Postgres for the org they're acting on; 403
+ * otherwise. (We don't ask the client which org — we use the only
+ * membership the user has. Multi-org membership selection is a
+ * future concern.)
+ *
+ * Storage: audio bytes go to Cloudflare R2 keyed by
+ * uploads/<orgSlug>/<uploadId>/<filename>. Metadata lives in the
+ * Postgres Upload row. No more SKILL_PATH writes here.
+ *
+ * Rep name comes from the authenticated Clerk user, not a form
+ * field. The `rep` value submitted by the upload form is intentionally
+ * ignored — it's still in the UI as a leftover from the file-based
+ * era but doesn't influence persistence.
+ */
 import { Readable } from "node:stream";
-import fs from "node:fs";
-import path from "node:path";
 import busboy from "busboy";
 import { after } from "next/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
+import { prisma } from "@/lib/db";
+import { uploadToR2, audioKey } from "@/lib/r2";
+import { transcribeUpload } from "@/lib/transcribe";
 import {
   generateUniqueUploadId,
-  uploadDir,
   isAllowedAudioExtension,
   extensionFromFilename,
   ALLOWED_AUDIO_EXTENSIONS,
 } from "@/lib/upload-id";
-import { transcribeUpload } from "@/lib/transcribe";
 import { ALLOWED_OUTCOMES } from "@/lib/outcomes";
 
 export const runtime = "nodejs";
@@ -18,8 +36,6 @@ export const runtime = "nodejs";
 const MAX_BYTES = 100 * 1024 * 1024;
 
 const REQUIRED_FIELDS = [
-  "rep",
-  "gym",
   "prospect",
   "consultation_date",
   "outcome",
@@ -27,7 +43,57 @@ const REQUIRED_FIELDS = [
 
 type Fields = Partial<Record<(typeof REQUIRED_FIELDS)[number], string>>;
 
+function repDisplayName(u: {
+  firstName: string | null;
+  lastName: string | null;
+  username: string | null;
+  emailAddresses: { emailAddress: string }[];
+  id: string;
+}): string {
+  const first = (u.firstName ?? "").trim();
+  const last = (u.lastName ?? "").trim();
+  const full = `${first} ${last}`.trim();
+  if (full) return full;
+  if (u.username?.trim()) return u.username.trim();
+  const email = u.emailAddresses[0]?.emailAddress;
+  return email ?? u.id;
+}
+
 export async function POST(request: Request) {
+  // --- Auth + membership ---------------------------------------------------
+  const { userId } = await auth();
+  if (!userId) {
+    return Response.json({ error: "Unauthenticated" }, { status: 401 });
+  }
+
+  const user = await currentUser();
+  if (!user) {
+    return Response.json({ error: "Clerk user not found" }, { status: 401 });
+  }
+
+  const membership = await prisma.membership.findFirst({
+    where: { userId },
+    include: { org: true },
+  });
+  if (!membership) {
+    return Response.json(
+      { error: "No organization membership found for this user" },
+      { status: 403 },
+    );
+  }
+
+  const org = membership.org;
+  const repName = repDisplayName({
+    firstName: user.firstName,
+    lastName: user.lastName,
+    username: user.username,
+    emailAddresses: user.emailAddresses.map((e) => ({
+      emailAddress: e.emailAddress,
+    })),
+    id: user.id,
+  });
+
+  // --- Request shape -------------------------------------------------------
   if (!request.body) {
     return Response.json({ error: "No request body" }, { status: 400 });
   }
@@ -39,6 +105,11 @@ export async function POST(request: Request) {
     );
   }
 
+  // --- Multipart parse -----------------------------------------------------
+  // We buffer the audio body into memory rather than streaming it to R2
+  // because R2's S3 PutObject expects a known-length body and the SDK's
+  // multipart upload (Upload from @aws-sdk/lib-storage) adds another dep
+  // we don't need at this scale (100 MB cap).
   return new Promise<Response>((resolve) => {
     const bb = busboy({
       headers: { "content-type": contentType },
@@ -46,28 +117,15 @@ export async function POST(request: Request) {
     });
 
     const fields: Fields = {};
-    let dir: string | null = null;
     let uploadId: string | null = null;
     let audioFilename: string | null = null;
-    let writeStream: fs.WriteStream | null = null;
+    let audioContentType = "application/octet-stream";
+    const audioChunks: Buffer[] = [];
+    let audioBytes = 0;
     let tooLarge = false;
     let extensionInvalid = false;
     let invalidName: string | null = null;
-    let writeError: Error | null = null;
     let resolved = false;
-
-    function safeCleanup() {
-      if (dir && fs.existsSync(dir)) {
-        try {
-          fs.rmSync(dir, { recursive: true, force: true });
-        } catch (cleanupErr) {
-          console.error(
-            `Failed to clean up partial upload at ${dir}:`,
-            cleanupErr,
-          );
-        }
-      }
-    }
 
     function reply(res: Response) {
       if (resolved) return;
@@ -79,6 +137,9 @@ export async function POST(request: Request) {
       if ((REQUIRED_FIELDS as readonly string[]).includes(name)) {
         fields[name as (typeof REQUIRED_FIELDS)[number]] = value;
       }
+      // `rep` and `gym` form fields are accepted (no-op) for back-compat
+      // with the existing upload-form.tsx — the server doesn't persist
+      // them; rep comes from Clerk, gym is implicit in the org.
     });
 
     bb.on("file", (fieldname, file, info) => {
@@ -96,9 +157,7 @@ export async function POST(request: Request) {
         return;
       }
 
-      const missing = REQUIRED_FIELDS.filter(
-        (k) => !fields[k]?.trim(),
-      );
+      const missing = REQUIRED_FIELDS.filter((k) => !fields[k]?.trim());
       if (missing.length > 0) {
         file.resume();
         reply(
@@ -136,48 +195,23 @@ export async function POST(request: Request) {
         return;
       }
 
-      try {
-        uploadId = generateUniqueUploadId({
-          consultationDate: fields.consultation_date!,
-          rep: fields.rep!,
-          outcome: fields.outcome!,
-        });
-      } catch (err) {
-        file.resume();
-        const msg = err instanceof Error ? err.message : String(err);
-        reply(Response.json({ error: msg }, { status: 500 }));
-        return;
-      }
-
-      dir = uploadDir(uploadId);
-      try {
-        fs.mkdirSync(dir, { recursive: true });
-      } catch (err) {
-        file.resume();
-        const msg = err instanceof Error ? err.message : String(err);
-        reply(
-          Response.json(
-            { error: `Failed to create upload directory: ${msg}` },
-            { status: 500 },
-          ),
-        );
-        return;
-      }
+      uploadId = generateUniqueUploadId({
+        consultationDate: fields.consultation_date!,
+        rep: repName,
+        outcome: fields.outcome!,
+      });
 
       const ext = extensionFromFilename(filename)!;
       audioFilename = `recording.${ext}`;
-      const audioPath = path.join(dir, audioFilename);
-      writeStream = fs.createWriteStream(audioPath);
+      audioContentType = info.mimeType || "application/octet-stream";
 
-      writeStream.on("error", (err) => {
-        writeError = err;
+      file.on("data", (chunk: Buffer) => {
+        audioBytes += chunk.length;
+        audioChunks.push(chunk);
       });
-
       file.on("limit", () => {
         tooLarge = true;
       });
-
-      file.pipe(writeStream);
     });
 
     bb.on("close", async () => {
@@ -192,29 +226,13 @@ export async function POST(request: Request) {
         );
       }
 
-      if (!uploadId || !dir || !audioFilename || !writeStream) {
+      if (!uploadId || !audioFilename) {
         return reply(
           Response.json({ error: "No audio file received" }, { status: 400 }),
         );
       }
 
-      await new Promise<void>((res) => {
-        if (writeStream!.closed) res();
-        else writeStream!.once("close", () => res());
-      });
-
-      if (writeError) {
-        safeCleanup();
-        return reply(
-          Response.json(
-            { error: `Failed to write audio: ${writeError.message}` },
-            { status: 500 },
-          ),
-        );
-      }
-
       if (tooLarge) {
-        safeCleanup();
         return reply(
           Response.json(
             { error: `Audio file exceeds the 100 MB limit` },
@@ -223,40 +241,57 @@ export async function POST(request: Request) {
         );
       }
 
-      const metadata = {
-        upload_id: uploadId,
-        rep: fields.rep!.trim(),
-        gym: fields.gym!.trim(),
-        prospect: fields.prospect!.trim(),
-        consultation_date: fields.consultation_date!,
-        outcome: fields.outcome!,
-        audio_filename: audioFilename,
-        audio_size_bytes: writeStream.bytesWritten,
-        uploaded_at: new Date().toISOString(),
-        status: "uploaded" as const,
-      };
+      const audioBuffer = Buffer.concat(audioChunks);
+      const r2Key = audioKey(org.slug, uploadId, audioFilename);
 
+      // R2 first, DB second. If R2 fails we never create a phantom
+      // Upload row pointing at a missing object.
       try {
-        fs.writeFileSync(
-          path.join(dir, "metadata.json"),
-          JSON.stringify(metadata, null, 2),
-        );
+        await uploadToR2(r2Key, audioBuffer, audioContentType);
       } catch (err) {
-        safeCleanup();
         const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[upload] R2 upload failed for ${uploadId}:`, err);
         return reply(
           Response.json(
-            { error: `Failed to write metadata: ${msg}` },
+            { error: `Failed to upload audio to R2: ${msg}` },
             { status: 500 },
           ),
         );
       }
 
-      // Schedule transcription to run after the response is sent. This
-      // uses Next.js's after() so the request lifecycle stays clean and
-      // it works the same on Node and (future) serverless deployments.
-      // transcribeUpload never throws — the .catch is belt-and-suspenders.
       const finalUploadId = uploadId;
+      try {
+        await prisma.upload.create({
+          data: {
+            id: finalUploadId,
+            orgId: org.id,
+            repUserId: userId,
+            prospectName: fields.prospect!.trim(),
+            consultationDate: new Date(`${fields.consultation_date}T00:00:00Z`),
+            outcome: fields.outcome!,
+            audioR2Key: r2Key,
+            audioFilename,
+            audioSizeBytes: audioBytes,
+            status: "uploaded",
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[upload] Postgres insert failed for ${finalUploadId}:`,
+          err,
+        );
+        // Best-effort: the R2 object will be orphaned. A cron cleanup
+        // that compares R2 keys against the Upload table can sweep
+        // these later — not urgent enough to do inline.
+        return reply(
+          Response.json(
+            { error: `Failed to persist upload metadata: ${msg}` },
+            { status: 500 },
+          ),
+        );
+      }
+
       after(async () => {
         try {
           await transcribeUpload(finalUploadId);
@@ -268,11 +303,10 @@ export async function POST(request: Request) {
         }
       });
 
-      reply(Response.json({ upload_id: uploadId }, { status: 200 }));
+      reply(Response.json({ upload_id: finalUploadId }, { status: 200 }));
     });
 
     bb.on("error", (err: Error) => {
-      safeCleanup();
       reply(
         Response.json(
           { error: `Upload parse error: ${err.message}` },
@@ -285,7 +319,6 @@ export async function POST(request: Request) {
       request.body as unknown as import("node:stream/web").ReadableStream,
     );
     nodeReadable.on("error", (err) => {
-      safeCleanup();
       reply(
         Response.json(
           { error: `Request stream error: ${err.message}` },
