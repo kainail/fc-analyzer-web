@@ -2,7 +2,11 @@
  * Invite a rep to the caller's gym.
  *
  * POST /api/reps/invite
- *   body: { email: string, name?: string }
+ *   body: { email: string }
+ *
+ * Name isn't collected here — Clerk asks for it during the
+ * invitee's sign-up flow, so duplicating the field on the inviter's
+ * form was just friction.
  *
  * Auth: Clerk user must have a Membership in some Organization with
  * role in (owner, manager). Reps cannot invite. Super admins go
@@ -51,7 +55,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { email?: string; name?: string };
+  let body: { email?: string };
   try {
     body = await request.json();
   } catch {

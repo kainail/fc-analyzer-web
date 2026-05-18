@@ -8,13 +8,11 @@ export default function InviteRepForm() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
     setEmail("");
-    setName("");
     setError(null);
   }
 
@@ -31,7 +29,7 @@ export default function InviteRepForm() {
       const res = await fetch("/api/reps/invite", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: v, name: name.trim() || undefined }),
+        body: JSON.stringify({ email: v }),
       });
       const body = (await res.json().catch(() => ({}))) as {
         success?: boolean;
@@ -74,9 +72,12 @@ export default function InviteRepForm() {
         marginBottom: 14,
       }}
     >
-      <div className="field" style={{ flex: 2, minWidth: 220 }}>
+      <div className="field" style={{ flex: 1, minWidth: 240 }}>
         <label className="label" htmlFor="rep-invite-email">
           Email <span className="req">*</span>
+          <span className="hint">
+            Name comes from Clerk on sign-up
+          </span>
         </label>
         <input
           id="rep-invite-email"
@@ -89,21 +90,6 @@ export default function InviteRepForm() {
           spellCheck={false}
           disabled={busy}
           required
-        />
-      </div>
-      <div className="field" style={{ flex: 1, minWidth: 180 }}>
-        <label className="label" htmlFor="rep-invite-name">
-          Name <span className="hint">optional</span>
-        </label>
-        <input
-          id="rep-invite-name"
-          type="text"
-          className="input"
-          placeholder="e.g. Maya Soto"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          autoCapitalize="words"
-          disabled={busy}
         />
       </div>
       <div style={{ display: "flex", gap: 6 }}>
