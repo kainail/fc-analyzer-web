@@ -3,36 +3,31 @@
  *
  * POST /api/onboarding/activate (no body)
  *
- * Reads the authenticated user's Clerk publicMetadata
- * (`invitedOrgId`, `invitedRole`) and creates the corresponding
- * Membership row. Sets the `has-membership=1` cookie so the
- * middleware's per-request DB check stays cached.
+ * Used by the /onboarding/rep welcome screen's "Go to dashboard"
+ * button to create the rep's Membership row from their Clerk
+ * publicMetadata.
  *
- * Why this is a separate endpoint from /api/onboarding (which
- * creates a brand-new gym from form input): the previous flow read
- * publicMetadata inside the /onboarding server component itself,
- * mixing a read-only page render with an unconditional write side
- * effect. Worse, the page-level code defaulted to `role: "owner"`
- * whenever `invitedRole` wasn't literally the string "rep" — which
- * meant any flicker in metadata copy-through, or any case where
- * `invitedRole` was missing, silently promoted the invitee to gym
- * owner.
+ * In practice this route is rep-only:
+ *   - Owners now go through /api/onboarding (the gym creation form
+ *     creates the Organization AND the owner Membership in one
+ *     transaction; super-admin invites no longer pre-create orgs).
+ *   - Reps land here because their invite carries an existing
+ *     invitedOrgId pointing at the inviter's gym.
  *
- * Behavior here:
- *   - Caller must be authenticated (Clerk).
- *   - Caller's currentUser().publicMetadata MUST have both
- *     `invitedOrgId` and `invitedRole`. Either missing → 400.
- *   - `invitedRole` is strictly normalized: only "owner", "manager",
- *     or "rep" are accepted; anything else returns 400 rather than
- *     defaulting to a role the inviter didn't intend.
- *   - The invited org must still exist → 404 otherwise (super
- *     admin or owner may have deleted it between invite-send and
- *     accept; user can re-invite or set up a new gym).
- *   - Membership upsert by (userId, orgId) — re-runs are idempotent.
+ * The route still validates `invitedRole` strictly (owner | manager
+ * | rep) so an owner who somehow ends up here doesn't get silently
+ * mis-roled, and so manager invites would Just Work if we ever add
+ * that flow.
+ *
+ * The old org-existence pre-check is gone. The Organization is now
+ * guaranteed to exist (rep invites pull invitedOrgId straight from
+ * the inviter's Membership row), so the extra round-trip is wasted
+ * work — the FK constraint on Membership.orgId catches any
+ * inconsistency at write time.
  */
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
-import { Role } from "@/lib/generated/prisma/client";
+import { Prisma, Role } from "@/lib/generated/prisma/client";
 
 export const runtime = "nodejs";
 
@@ -84,33 +79,39 @@ export async function POST() {
     );
   }
 
-  const org = await prisma.organization.findUnique({
-    where: { id: invitedOrgId },
-    select: { id: true, slug: true },
-  });
-  if (!org) {
-    return Response.json(
-      {
-        error: "org_not_found",
-        message:
-          "The gym you were invited to no longer exists. Contact the person who invited you, or create a new gym at /onboarding.",
-      },
-      { status: 404 },
-    );
+  try {
+    await prisma.membership.upsert({
+      where: { userId_orgId: { userId, orgId: invitedOrgId } },
+      update: { role },
+      create: { userId, orgId: invitedOrgId, role },
+    });
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2003"
+    ) {
+      // FK violation on Membership.orgId — the invited org was
+      // deleted between invite-send and accept. The /onboarding/rep
+      // page already redirects in that case, so this is a defense-
+      // in-depth path; the response code is the relevant signal.
+      return Response.json(
+        {
+          error: "org_not_found",
+          message:
+            "The gym you were invited to no longer exists. Contact the person who invited you, or create a new gym at /onboarding.",
+        },
+        { status: 404 },
+      );
+    }
+    throw err;
   }
 
-  await prisma.membership.upsert({
-    where: { userId_orgId: { userId, orgId: org.id } },
-    update: { role },
-    create: { userId, orgId: org.id, role },
-  });
-
   console.log(
-    `[onboarding/activate] activated user=${userId} as role=${role} in org=${org.slug}`,
+    `[onboarding/activate] activated user=${userId} as role=${role} in org=${invitedOrgId}`,
   );
 
   const response = new Response(
-    JSON.stringify({ success: true, role, orgSlug: org.slug }),
+    JSON.stringify({ success: true, role, orgId: invitedOrgId }),
     {
       status: 200,
       headers: { "content-type": "application/json" },
