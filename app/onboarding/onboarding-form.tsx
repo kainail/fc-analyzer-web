@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArrowR } from "@/lib/icons";
 
@@ -12,7 +11,6 @@ function slugify(s: string): string {
 }
 
 export default function OnboardingForm() {
-  const router = useRouter();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   // Once the user manually edits the slug, stop auto-deriving from name.
@@ -58,11 +56,12 @@ export default function OnboardingForm() {
         setSubmitting(false);
         return;
       }
-      // Server has set the has-membership cookie and returned success;
-      // route us to the dashboard. router.refresh() forces the dashboard
-      // server component to re-render against the new membership state.
-      router.push("/dashboard");
-      router.refresh();
+      // Hard navigation (not router.push) so the new has-membership
+      // cookie is picked up by middleware on a fresh request rather
+      // than relying on RSC payload updates from the soft transition.
+      // router.push + router.refresh left a brief blank-page window
+      // because middleware's cookie read was racing the soft nav.
+      window.location.href = "/dashboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
