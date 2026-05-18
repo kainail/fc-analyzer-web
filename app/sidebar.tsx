@@ -7,19 +7,41 @@ import {
   Upload as UploadIcon,
   Activity,
   Settings,
+  TrendUp,
 } from "@/lib/icons";
 
-function isActive(pathname: string, kind: "dashboard" | "upload" | "processing") {
+export type SidebarRole = "owner" | "manager" | "rep" | null;
+
+function isActive(
+  pathname: string,
+  kind:
+    | "dashboard"
+    | "upload"
+    | "processing"
+    | "reps"
+    | "admin",
+) {
   if (kind === "dashboard") {
-    return pathname.startsWith("/dashboard") || pathname.startsWith("/analysis");
+    return (
+      pathname.startsWith("/dashboard") || pathname.startsWith("/analysis")
+    );
   }
   if (kind === "upload") return pathname === "/";
   if (kind === "processing") return pathname.startsWith("/status");
+  if (kind === "reps") return pathname.startsWith("/reps");
+  if (kind === "admin") return pathname.startsWith("/admin");
   return false;
 }
 
-export default function Sidebar() {
+export default function Sidebar({
+  role,
+  isSuperAdmin,
+}: {
+  role: SidebarRole;
+  isSuperAdmin: boolean;
+}) {
   const pathname = usePathname();
+  const canManageReps = role === "owner" || role === "manager";
 
   return (
     <aside className="sidebar">
@@ -34,22 +56,52 @@ export default function Sidebar() {
       <div className="nav-section">Workspace</div>
       <Link
         href="/dashboard"
-        className={"nav-item" + (isActive(pathname, "dashboard") ? " active" : "")}
+        className={
+          "nav-item" + (isActive(pathname, "dashboard") ? " active" : "")
+        }
       >
         <Grid /> Consultations
       </Link>
       <Link
         href="/"
-        className={"nav-item" + (isActive(pathname, "upload") ? " active" : "")}
+        className={
+          "nav-item" + (isActive(pathname, "upload") ? " active" : "")
+        }
       >
         <UploadIcon /> New upload
       </Link>
       <Link
         href="/dashboard"
-        className={"nav-item" + (isActive(pathname, "processing") ? " active" : "")}
+        className={
+          "nav-item" + (isActive(pathname, "processing") ? " active" : "")
+        }
       >
         <Activity /> Processing
       </Link>
+      {canManageReps && (
+        <Link
+          href="/reps"
+          className={
+            "nav-item" + (isActive(pathname, "reps") ? " active" : "")
+          }
+        >
+          <TrendUp /> Reps
+        </Link>
+      )}
+
+      {isSuperAdmin && (
+        <>
+          <div className="nav-section">Platform</div>
+          <Link
+            href="/admin"
+            className={
+              "nav-item" + (isActive(pathname, "admin") ? " active" : "")
+            }
+          >
+            <Settings /> Admin
+          </Link>
+        </>
+      )}
 
       <div className="sidebar-foot">
         <div className="avatar">CS</div>
@@ -64,7 +116,17 @@ export default function Sidebar() {
           >
             Cam Singh
           </div>
-          <div className="user-role">Regional manager</div>
+          <div className="user-role">
+            {role
+              ? role === "owner"
+                ? "Gym owner"
+                : role === "manager"
+                  ? "Manager"
+                  : "Rep"
+              : isSuperAdmin
+                ? "Super admin"
+                : "Signed in"}
+          </div>
         </div>
         <button
           className="btn btn-ghost btn-sm"
