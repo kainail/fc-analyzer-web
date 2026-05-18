@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
-import { Prisma } from "@/lib/generated/prisma/client";
 import OnboardingForm from "./onboarding-form";
+import ActivateInvite from "./activate-invite";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ export default async function OnboardingPage() {
     redirect("/sign-in");
   }
 
-  // If the user already has a membership, they don't belong here.
+  // Already a member of some org → /dashboard, no work to do here.
   const existing = await prisma.membership.findFirst({
     where: { userId },
     select: { id: true },
@@ -21,47 +21,30 @@ export default async function OnboardingPage() {
     redirect("/dashboard");
   }
 
-  // Invite path: super-admin-initiated signups carry the pre-created
-  // org id in Clerk publicMetadata (see /api/admin/invite). If we see
-  // it AND the org still exists, auto-create the owner Membership and
-  // skip the form entirely. If the org has been deleted between
-  // invite-send and accept, fall through to the normal form so the
-  // user can still create a gym manually.
+  // Invite path: Clerk publicMetadata carries the invitedOrgId +
+  // invitedRole the inviter set. If BOTH are present we render the
+  // ActivateInvite client which POSTs to /api/onboarding/activate
+  // (single source of truth for invite → Membership). That route
+  // does its own validation — we just check for presence here to
+  // decide which UI to show.
+  //
+  // PREVIOUS BUG: the old version of this file did the membership
+  // create inline in the server component, defaulting role to
+  // "owner" whenever invitedRole !== "rep". Any rep invite where
+  // the metadata didn't round-trip cleanly silently promoted the
+  // invitee to owner. The activate route's parseRole is strict
+  // and rejects unknown values instead of defaulting.
   const user = await currentUser();
   const meta = (user?.publicMetadata ?? {}) as {
-    invitedOrgId?: string;
-    invitedRole?: string;
+    invitedOrgId?: unknown;
+    invitedRole?: unknown;
   };
-  if (meta.invitedOrgId) {
-    const org = await prisma.organization.findUnique({
-      where: { id: meta.invitedOrgId },
-      select: { id: true },
-    });
-    if (org) {
-      try {
-        await prisma.membership.create({
-          data: {
-            userId,
-            orgId: org.id,
-            role: meta.invitedRole === "rep" ? "rep" : "owner",
-          },
-        });
-      } catch (err) {
-        // P2002 = the (userId, orgId) tuple already exists. Treat
-        // as success — somebody else (or a retry) already wired it
-        // up; we just want to get them to the dashboard.
-        if (
-          !(
-            err instanceof Prisma.PrismaClientKnownRequestError &&
-            err.code === "P2002"
-          )
-        ) {
-          throw err;
-        }
-      }
-      redirect("/dashboard");
-    }
-  }
+  const hasInvite =
+    typeof meta.invitedOrgId === "string" &&
+    meta.invitedOrgId.length > 0 &&
+    (meta.invitedRole === "owner" ||
+      meta.invitedRole === "manager" ||
+      meta.invitedRole === "rep");
 
   return (
     <div
@@ -101,7 +84,7 @@ export default async function OnboardingPage() {
               letterSpacing: "-0.02em",
             }}
           >
-            Set up your gym
+            {hasInvite ? "Joining your team…" : "Set up your gym"}
           </h1>
           <p
             style={{
@@ -111,24 +94,27 @@ export default async function OnboardingPage() {
               lineHeight: 1.5,
             }}
           >
-            One quick step before you can upload consultations. Pick a name
-            and a URL slug for your gym.
+            {hasInvite
+              ? "Your invitation is being activated — you'll land on the dashboard in a moment."
+              : "One quick step before you can upload consultations. Pick a name and a URL slug for your gym."}
           </p>
         </div>
 
-        <OnboardingForm />
+        {hasInvite ? <ActivateInvite /> : <OnboardingForm />}
 
-        <div
-          style={{
-            marginTop: 18,
-            paddingTop: 14,
-            borderTop: "1px solid var(--divider)",
-            color: "var(--ink-4)",
-            fontSize: 12,
-          }}
-        >
-          You&rsquo;ll be the owner. You can invite reps after setup.
-        </div>
+        {!hasInvite && (
+          <div
+            style={{
+              marginTop: 18,
+              paddingTop: 14,
+              borderTop: "1px solid var(--divider)",
+              color: "var(--ink-4)",
+              fontSize: 12,
+            }}
+          >
+            You&rsquo;ll be the owner. You can invite reps after setup.
+          </div>
+        )}
       </div>
     </div>
   );
