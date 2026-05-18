@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SignOutButton } from "@clerk/nextjs";
 import {
   Grid,
   Upload as UploadIcon,
   Activity,
+  LogOut,
   Settings,
   TrendUp,
 } from "@/lib/icons";
@@ -136,6 +138,21 @@ export default function Sidebar({
         >
           <Settings size={14} />
         </button>
+        {/* Clerk's SignOutButton wraps a child and adds an onClick that
+         *  signs the user out + navigates. asChild lets our styled
+         *  button be the actual rendered element rather than nesting
+         *  inside Clerk's default button (which would double up the
+         *  click surface and the styling). */}
+        <SignOutButton>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ width: 28, padding: 0 }}
+            aria-label="Sign out"
+            type="button"
+          >
+            <LogOut size={14} />
+          </button>
+        </SignOutButton>
       </div>
     </aside>
   );
