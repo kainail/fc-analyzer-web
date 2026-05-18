@@ -2,37 +2,27 @@
  * Super admin — invite a new gym owner.
  *
  * POST /api/admin/invite
- *   body: { email: string, name: string, slug: string }
+ *   body: { email: string }
  *
- * Two-step flow:
- *   1. Create the Organization row with the chosen slug. The slug
- *      uniqueness check happens here (409 if taken) — the
- *      Organization is the durable record of the gym, even if the
- *      invitee never accepts.
- *   2. Send a Clerk invitation to `email` with publicMetadata
- *      carrying { invitedOrgId, invitedRole: "owner" }. Clerk emails
- *      the recipient a sign-up link. When they accept and complete
- *      sign-up, Clerk copies the metadata onto the new User object.
- *      The /onboarding page reads it and auto-creates the owner
- *      Membership for the pre-existing Organization.
+ * Sends a Clerk invitation with publicMetadata
+ * { invitedRole: "owner" }. NO invitedOrgId — the org doesn't
+ * exist yet. The invitee accepts the invite, signs up, and lands
+ * on /onboarding where they fill in their own gym name + slug
+ * via OnboardingForm. /api/onboarding then creates the
+ * Organization + the owner Membership in one transaction.
  *
- * Failure mode: if step 2 fails after step 1 succeeded, the
- * Organization sits orphaned (no members). The super admin can
- * delete it from /admin and re-invite. We don't roll back step 1
- * automatically because partial-rollback of Clerk side effects gets
- * messy, and the visible org with no members is easier to recover
- * from than a stuck-in-transaction state.
+ * Pre-creating the org here was the old design and caused two
+ * problems: (1) orphan orgs when invitees never accepted, and
+ * (2) the super admin had to invent a slug for the owner instead
+ * of letting them pick. Both gone now.
  *
  * Super admin only.
  */
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { prisma } from "@/lib/db";
 import { isSuperAdmin } from "@/lib/super-admin";
-import { Prisma } from "@/lib/generated/prisma/client";
 
 export const runtime = "nodejs";
 
-const SLUG_RE = /^[a-z0-9-]+$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: Request) {
@@ -44,7 +34,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { email?: string; name?: string; slug?: string };
+  let body: { email?: string };
   try {
     body = await request.json();
   } catch {
@@ -55,53 +45,15 @@ export async function POST(request: Request) {
   }
 
   const email = body.email?.trim().toLowerCase();
-  const name = body.name?.trim();
-  const slug = body.slug?.trim();
-
   if (!email || !EMAIL_RE.test(email)) {
     return Response.json(
       { error: "valid email is required" },
       { status: 400 },
     );
   }
-  if (!name) {
-    return Response.json({ error: "name is required" }, { status: 400 });
-  }
-  if (!slug || !SLUG_RE.test(slug)) {
-    return Response.json(
-      {
-        error:
-          "slug must contain only lowercase letters, numbers, and hyphens",
-      },
-      { status: 400 },
-    );
-  }
 
-  // Step 1: create the Organization.
-  let orgId: string;
-  try {
-    const org = await prisma.organization.create({
-      data: { name, slug },
-    });
-    orgId = org.id;
-  } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
-      return Response.json({ error: "slug_taken" }, { status: 409 });
-    }
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[admin/invite] org create failed:", err);
-    return Response.json(
-      { error: `Failed to create organization: ${msg}` },
-      { status: 500 },
-    );
-  }
-
-  // Build the post-signup redirect URL. Clerk wants an absolute URL.
-  // Prefer X-Forwarded-Host / Host so this works in both local dev
-  // and Railway (which sits behind a proxy).
+  // Redirect URL built from x-forwarded-* / Host so it works behind
+  // Railway's proxy AND in local dev.
   const proto =
     request.headers.get("x-forwarded-proto") ??
     (request.url.startsWith("https") ? "https" : "http");
@@ -111,40 +63,28 @@ export async function POST(request: Request) {
     ? `${proto}://${host}/onboarding`
     : "/onboarding";
 
-  // Step 2: Clerk invitation.
   try {
     const client = await clerkClient();
     const invitation = await client.invitations.createInvitation({
       emailAddress: email,
-      // Metadata is copied onto the resulting User object when the
-      // invitee accepts. /onboarding reads it.
       publicMetadata: {
-        invitedOrgId: orgId,
         invitedRole: "owner",
       },
       redirectUrl,
-      // ignoreExisting: invitations to the same email can be re-sent
-      // — useful when re-inviting after a typo or expired link.
       ignoreExisting: true,
     });
 
     console.log(
-      `[admin/invite] invited ${email} to org=${orgId} (invitation=${invitation.id})`,
+      `[admin/invite] ${userId} invited new owner: email=${email} (invitation=${invitation.id})`,
     );
     return Response.json({ success: true, inviteId: invitation.id });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(
-      `[admin/invite] Clerk invitation failed for org=${orgId} email=${email}:`,
-      err,
-    );
-    // Org row left in place — super admin can delete or re-invite
-    // from /admin. See file header for the partial-rollback rationale.
+    console.error(`[admin/invite] Clerk invitation failed for ${email}:`, err);
     return Response.json(
-      {
-        error: `Organization created but invitation send failed: ${msg}. Re-invite from /admin.`,
-      },
+      { error: `Failed to send invitation: ${msg}` },
       { status: 502 },
     );
   }
 }
+
