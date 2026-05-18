@@ -14,6 +14,11 @@ import {
 
 export type SidebarRole = "owner" | "manager" | "rep" | null;
 
+export type SidebarUser = {
+  name: string;
+  initials: string;
+};
+
 function isActive(
   pathname: string,
   kind:
@@ -21,7 +26,8 @@ function isActive(
     | "upload"
     | "processing"
     | "reps"
-    | "admin",
+    | "admin"
+    | "settings",
 ) {
   if (kind === "dashboard") {
     return (
@@ -32,18 +38,24 @@ function isActive(
   if (kind === "processing") return pathname.startsWith("/status");
   if (kind === "reps") return pathname.startsWith("/reps");
   if (kind === "admin") return pathname.startsWith("/admin");
+  if (kind === "settings") return pathname.startsWith("/settings");
   return false;
 }
 
 export default function Sidebar({
   role,
   isSuperAdmin,
+  user,
 }: {
   role: SidebarRole;
   isSuperAdmin: boolean;
+  user: SidebarUser | null;
 }) {
   const pathname = usePathname();
   const canManageReps = role === "owner" || role === "manager";
+
+  const displayName = user?.name ?? "Signed out";
+  const initials = user?.initials ?? "?";
 
   return (
     <aside className="sidebar">
@@ -106,7 +118,7 @@ export default function Sidebar({
       )}
 
       <div className="sidebar-foot">
-        <div className="avatar">CS</div>
+        <div className="avatar">{initials}</div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div
             className="user-name"
@@ -115,8 +127,9 @@ export default function Sidebar({
               overflow: "hidden",
               textOverflow: "ellipsis",
             }}
+            title={displayName}
           >
-            Cam Singh
+            {displayName}
           </div>
           <div className="user-role">
             {role
@@ -130,19 +143,21 @@ export default function Sidebar({
                 : "Signed in"}
           </div>
         </div>
-        <button
-          className="btn btn-ghost btn-sm"
+        <Link
+          href="/settings"
+          className={
+            "btn btn-ghost btn-sm" +
+            (isActive(pathname, "settings") ? " active" : "")
+          }
           style={{ width: 28, padding: 0 }}
           aria-label="Settings"
-          type="button"
         >
           <Settings size={14} />
-        </button>
+        </Link>
         {/* Clerk's SignOutButton wraps a child and adds an onClick that
-         *  signs the user out + navigates. asChild lets our styled
-         *  button be the actual rendered element rather than nesting
-         *  inside Clerk's default button (which would double up the
-         *  click surface and the styling). */}
+         *  signs the user out + navigates. Using our own styled button
+         *  as the child keeps the design-system styling and avoids
+         *  double-stacked click handlers. */}
         <SignOutButton>
           <button
             className="btn btn-ghost btn-sm"
