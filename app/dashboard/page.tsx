@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import {
   listAnalyzedUploads,
@@ -11,6 +12,7 @@ import { ALL_OUTCOMES } from "@/lib/outcomes";
 import { fmtDate, initials, scoreBand, bandClass } from "@/lib/format";
 import { ChevronR, Plus, TrendUp } from "@/lib/icons";
 import DashboardFilters from "./dashboard-filters";
+import WelcomeBanner from "./welcome-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -254,6 +256,13 @@ export default async function DashboardPage({
   const sp = await searchParams;
   const filters = parseFilters(sp);
 
+  // show-welcome cookie is set by /api/onboarding on the first
+  // post-onboarding response; the WelcomeBanner client component
+  // clears it on dismiss. We just read it server-side and render
+  // the banner if present.
+  const cookieStore = await cookies();
+  const showWelcome = cookieStore.get("show-welcome")?.value === "1";
+
   // Tenant context: every dashboard read is scoped to the caller's
   // Org. No org = no rows. The page still renders the chrome around
   // the empty state so an unauthed visitor doesn't see a broken page.
@@ -302,6 +311,7 @@ export default async function DashboardPage({
 
   return (
     <div className="content wide">
+      {showWelcome && <WelcomeBanner />}
       <div className="page-head">
         <div>
           <h2>Consultations</h2>

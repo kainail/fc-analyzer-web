@@ -104,19 +104,22 @@ export async function POST(request: Request) {
     );
   }
 
-  // Set the membership cache cookie so the middleware skips its
-  // Postgres lookup for the next hour. The cookie is HTTP-only and
-  // path-scoped to the whole app.
-  const headers = new Headers();
-  headers.append(
+  // Two cookies on success:
+  // - has-membership=1 (HttpOnly, 1h) tells the middleware to skip
+  //   its Postgres lookup for the next hour.
+  // - show-welcome=1 (session, NOT HttpOnly so the dashboard's
+  //   welcome banner can clear it client-side on dismiss).
+  const response = new Response(JSON.stringify({ success: true }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+  response.headers.append(
     "set-cookie",
     `has-membership=1; Path=/; Max-Age=${ONE_HOUR_S}; HttpOnly; SameSite=Lax`,
   );
-  return new Response(JSON.stringify({ success: true }), {
-    status: 200,
-    headers: {
-      "content-type": "application/json",
-      "set-cookie": headers.get("set-cookie")!,
-    },
-  });
+  response.headers.append(
+    "set-cookie",
+    `show-welcome=1; Path=/; SameSite=Lax`,
+  );
+  return response;
 }
