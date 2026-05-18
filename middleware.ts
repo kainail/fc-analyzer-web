@@ -49,6 +49,11 @@ const skipsMembershipCheck = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/onboarding(.*)",
+  // /admin pages do their own isSuperAdmin gate (lib/super-admin.ts).
+  // Super admins don't necessarily belong to any Organization, so a
+  // membership-redirect here would bounce them to /onboarding even
+  // though they have legitimate platform-level access.
+  "/admin(.*)",
   "/api/(.*)",
 ]);
 
