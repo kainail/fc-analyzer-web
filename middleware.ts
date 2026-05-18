@@ -29,6 +29,16 @@ import { NextResponse } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 
+// Force Node runtime. Without this, middleware.ts runs on the Edge
+// runtime, where Node's `crypto` module isn't available — and Prisma
+// (specifically @prisma/adapter-pg via pg) needs node:crypto. Earlier
+// I read the Next.js 16 docs as saying middleware.ts now runs on Node
+// by default; in practice it still defaults to Edge and the opt-in is
+// this explicit runtime export. (The new `proxy.ts` filename does
+// default to Node; sticking with `middleware.ts` + this export keeps
+// the spec wording intact.)
+export const runtime = "nodejs";
+
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
