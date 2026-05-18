@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
 import OnboardingForm from "./onboarding-form";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,48 @@ export default async function OnboardingPage() {
   });
   if (existing) {
     redirect("/dashboard");
+  }
+
+  // Invite path: super-admin-initiated signups carry the pre-created
+  // org id in Clerk publicMetadata (see /api/admin/invite). If we see
+  // it AND the org still exists, auto-create the owner Membership and
+  // skip the form entirely. If the org has been deleted between
+  // invite-send and accept, fall through to the normal form so the
+  // user can still create a gym manually.
+  const user = await currentUser();
+  const meta = (user?.publicMetadata ?? {}) as {
+    invitedOrgId?: string;
+    invitedRole?: string;
+  };
+  if (meta.invitedOrgId) {
+    const org = await prisma.organization.findUnique({
+      where: { id: meta.invitedOrgId },
+      select: { id: true },
+    });
+    if (org) {
+      try {
+        await prisma.membership.create({
+          data: {
+            userId,
+            orgId: org.id,
+            role: meta.invitedRole === "rep" ? "rep" : "owner",
+          },
+        });
+      } catch (err) {
+        // P2002 = the (userId, orgId) tuple already exists. Treat
+        // as success — somebody else (or a retry) already wired it
+        // up; we just want to get them to the dashboard.
+        if (
+          !(
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === "P2002"
+          )
+        ) {
+          throw err;
+        }
+      }
+      redirect("/dashboard");
+    }
   }
 
   return (
