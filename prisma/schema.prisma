@@ -24,6 +24,7 @@ enum Role {
   owner
   manager
   rep
+  super_admin
 }
 
 model Organization {
@@ -92,6 +93,19 @@ model Transcript {
   upload Upload       @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+}
+
+// Platform-level super admins. Distinct from Membership: a SuperAdmin
+// is not bound to any one Organization — they can read / delete every
+// gym in the system. `addedBy` records the Clerk userId of whoever
+// granted the privilege (self-referential for the seed row). Not a FK
+// because we want to retain the audit trail even if the grantor's
+// record is later removed.
+model SuperAdmin {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  addedBy   String
+  createdAt DateTime @default(now())
 }
 
 model Analysis {
