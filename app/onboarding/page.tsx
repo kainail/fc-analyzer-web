@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db";
 import OnboardingForm from "./onboarding-form";
-import ActivateInvite from "./activate-invite";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +11,7 @@ export default async function OnboardingPage() {
     redirect("/sign-in");
   }
 
-  // Already a member of some org → /dashboard, no work to do here.
+  // Already a member of some org → /dashboard.
   const existing = await prisma.membership.findFirst({
     where: { userId },
     select: { id: true },
@@ -21,30 +20,28 @@ export default async function OnboardingPage() {
     redirect("/dashboard");
   }
 
-  // Invite path: Clerk publicMetadata carries the invitedOrgId +
-  // invitedRole the inviter set. If BOTH are present we render the
-  // ActivateInvite client which POSTs to /api/onboarding/activate
-  // (single source of truth for invite → Membership). That route
-  // does its own validation — we just check for presence here to
-  // decide which UI to show.
+  // Branch on the Clerk invite metadata:
   //
-  // PREVIOUS BUG: the old version of this file did the membership
-  // create inline in the server component, defaulting role to
-  // "owner" whenever invitedRole !== "rep". Any rep invite where
-  // the metadata didn't round-trip cleanly silently promoted the
-  // invitee to owner. The activate route's parseRole is strict
-  // and rejects unknown values instead of defaulting.
+  //   invitedRole === "rep"   → /onboarding/rep (welcome screen,
+  //                             button activates the Membership)
+  //   invitedRole === "owner" → fall through to the gym creation
+  //                             form below. The super-admin invite
+  //                             flow no longer pre-creates the org;
+  //                             the owner picks their own slug.
+  //   no invite metadata      → same as "owner" — direct signup
+  //                             treated as a new gym owner.
+  //
+  // Reps don't see the gym-creation form at all — the form's
+  // /api/onboarding submit would create a brand-new org and make
+  // them its owner, which is exactly the pancakekojo-shaped bug
+  // we fixed last week.
   const user = await currentUser();
   const meta = (user?.publicMetadata ?? {}) as {
-    invitedOrgId?: unknown;
     invitedRole?: unknown;
   };
-  const hasInvite =
-    typeof meta.invitedOrgId === "string" &&
-    meta.invitedOrgId.length > 0 &&
-    (meta.invitedRole === "owner" ||
-      meta.invitedRole === "manager" ||
-      meta.invitedRole === "rep");
+  if (meta.invitedRole === "rep") {
+    redirect("/onboarding/rep");
+  }
 
   return (
     <div
@@ -84,7 +81,7 @@ export default async function OnboardingPage() {
               letterSpacing: "-0.02em",
             }}
           >
-            {hasInvite ? "Joining your team…" : "Set up your gym"}
+            Set up your gym
           </h1>
           <p
             style={{
@@ -94,27 +91,24 @@ export default async function OnboardingPage() {
               lineHeight: 1.5,
             }}
           >
-            {hasInvite
-              ? "Your invitation is being activated — you'll land on the dashboard in a moment."
-              : "One quick step before you can upload consultations. Pick a name and a URL slug for your gym."}
+            One quick step before you can upload consultations. Pick a name
+            and a URL slug for your gym.
           </p>
         </div>
 
-        {hasInvite ? <ActivateInvite /> : <OnboardingForm />}
+        <OnboardingForm />
 
-        {!hasInvite && (
-          <div
-            style={{
-              marginTop: 18,
-              paddingTop: 14,
-              borderTop: "1px solid var(--divider)",
-              color: "var(--ink-4)",
-              fontSize: 12,
-            }}
-          >
-            You&rsquo;ll be the owner. You can invite reps after setup.
-          </div>
-        )}
+        <div
+          style={{
+            marginTop: 18,
+            paddingTop: 14,
+            borderTop: "1px solid var(--divider)",
+            color: "var(--ink-4)",
+            fontSize: 12,
+          }}
+        >
+          You&rsquo;ll be the owner. You can invite reps after setup.
+        </div>
       </div>
     </div>
   );
