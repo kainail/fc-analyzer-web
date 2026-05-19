@@ -1,60 +1,35 @@
-"use client";
+import { auth } from "@clerk/nextjs/server";
+import { prisma } from "@/lib/db";
+import Breadcrumbs from "./breadcrumbs";
+import NotificationBell from "./notification-bell";
 
-import Link from "next/link";
-import { useParams, usePathname } from "next/navigation";
-import { Fragment } from "react";
-import { Chevron } from "@/lib/icons";
-
-type Crumb = { label: string; href?: string };
-
-function buildCrumbs(pathname: string, params: Record<string, string | string[] | undefined>): Crumb[] {
-  if (pathname === "/") {
-    return [{ label: "Dashboard", href: "/dashboard" }, { label: "New upload" }];
+async function getUnreadCount(): Promise<number> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return 0;
+    return await prisma.notification.count({
+      where: { userId, read: false },
+    });
+  } catch (err) {
+    // Same silent-fallback pattern as the layout's sidebar context:
+    // static prerender raises "Dynamic server usage" here, which is
+    // expected, not a bug.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("Dynamic server usage")) {
+      console.error("[topbar] unread count lookup failed:", err);
+    }
+    return 0;
   }
-  if (pathname.startsWith("/dashboard")) {
-    return [{ label: "Dashboard" }];
-  }
-  if (pathname.startsWith("/status")) {
-    const id = typeof params.upload_id === "string" ? params.upload_id : "";
-    return [
-      { label: "Dashboard", href: "/dashboard" },
-      { label: id ? `Status · ${id}` : "Upload status" },
-    ];
-  }
-  if (pathname.startsWith("/analysis")) {
-    const id = typeof params.upload_id === "string" ? params.upload_id : "";
-    return [
-      { label: "Dashboard", href: "/dashboard" },
-      { label: id ? `Analysis · ${id}` : "Analysis" },
-    ];
-  }
-  return [{ label: "Dashboard", href: "/dashboard" }];
 }
 
-export default function Topbar() {
-  const pathname = usePathname();
-  const params = useParams();
-  const crumbs = buildCrumbs(pathname, params);
+export default async function Topbar() {
+  const unread = await getUnreadCount();
 
   return (
     <header className="topbar">
-      <div className="crumbs">
-        {crumbs.map((c, i) => (
-          <Fragment key={i}>
-            {c.href ? (
-              <Link href={c.href}>{c.label}</Link>
-            ) : (
-              <span style={{ color: "var(--ink)" }}>{c.label}</span>
-            )}
-            {i < crumbs.length - 1 && (
-              <span className="crumb-sep">
-                <Chevron size={12} />
-              </span>
-            )}
-          </Fragment>
-        ))}
-      </div>
+      <Breadcrumbs />
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <NotificationBell initialUnreadCount={unread} />
         <span className="kbd">⌘K</span>
         <span className="muted" style={{ fontSize: 12 }}>
           quick switch
