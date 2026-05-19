@@ -38,6 +38,7 @@ import {
   analysisJsonKey,
   coachingKey,
 } from "@/lib/r2";
+import { createNotification, sendEmailNotification } from "@/lib/notify";
 
 const MAX_TOKENS = 16000;
 
@@ -364,6 +365,34 @@ export async function analyzeUpload(uploadId: string): Promise<void> {
     console.log(
       `[analyze] ${uploadId}: done — status=analyzed${jsonParseError ? " (jsonParseError set)" : ""}, usage=${JSON.stringify(response.usage)}`,
     );
+
+    // Notify the rep that uploaded — best-effort. Failures here
+    // must never bubble up; the analysis is already persisted.
+    try {
+      await createNotification(
+        upload.repUserId,
+        upload.orgId,
+        uploadId,
+        "analysis_ready",
+      );
+    } catch (notifyErr) {
+      console.error(
+        `[analyze] ${uploadId}: createNotification failed (non-fatal):`,
+        notifyErr,
+      );
+    }
+    try {
+      await sendEmailNotification(
+        upload.repUserId,
+        uploadId,
+        "analysis_ready",
+      );
+    } catch (notifyErr) {
+      console.error(
+        `[analyze] ${uploadId}: sendEmailNotification failed (non-fatal):`,
+        notifyErr,
+      );
+    }
   } catch (err) {
     const message =
       err instanceof APIError
@@ -379,5 +408,32 @@ export async function analyzeUpload(uploadId: string): Promise<void> {
       uploadId,
       `Failed at ${failingStep}: ${message}`,
     );
+
+    // In-app notification for the failure. Best-effort, separate
+    // try/catch — the analysis itself already errored, so a
+    // notification failure shouldn't compound it. We re-fetch the
+    // upload's repUserId / orgId here because the outer try may
+    // have failed before `upload` was bound. Email is intentionally
+    // skipped for failures (spec: in-app only, no email noise on
+    // every transient API hiccup).
+    try {
+      const row = await prisma.upload.findUnique({
+        where: { id: uploadId },
+        select: { repUserId: true, orgId: true },
+      });
+      if (row) {
+        await createNotification(
+          row.repUserId,
+          row.orgId,
+          uploadId,
+          "upload_failed",
+        );
+      }
+    } catch (notifyErr) {
+      console.error(
+        `[analyze] ${uploadId}: failure-notification write failed (non-fatal):`,
+        notifyErr,
+      );
+    }
   }
 }
