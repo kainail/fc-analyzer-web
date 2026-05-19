@@ -27,16 +27,22 @@ enum Role {
   super_admin
 }
 
+enum NotificationType {
+  analysis_ready
+  upload_failed
+}
+
 model Organization {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
   createdAt DateTime @default(now())
 
-  memberships Membership[]
-  uploads     Upload[]
-  transcripts Transcript[]
-  analyses    Analysis[]
+  memberships   Membership[]
+  uploads       Upload[]
+  transcripts   Transcript[]
+  analyses      Analysis[]
+  notifications Notification[]
 }
 
 model Membership {
@@ -70,9 +76,10 @@ model Upload {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  transcript Transcript?
-  analysis   Analysis?
+  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  transcript    Transcript?
+  analysis      Analysis?
+  notifications Notification[]
 
   @@index([orgId, status])
   @@index([orgId, createdAt])
@@ -92,6 +99,28 @@ model Transcript {
   org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   upload Upload       @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 
+  @@index([orgId])
+}
+
+// In-app notifications for reps + owners (uploads finishing, errors).
+// userId is the Clerk id of whoever should see this notification.
+// orgId + uploadId are denormalized for cheap tenant-scoped reads
+// and to keep the row deletable via cascade when an upload or org
+// is removed. read defaults to false; the bell flips it true via
+// the /api/notifications/read endpoint.
+model Notification {
+  id        String           @id @default(cuid())
+  userId   String
+  orgId     String
+  uploadId  String
+  type      NotificationType
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  upload Upload       @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
   @@index([orgId])
 }
 
