@@ -32,6 +32,13 @@ enum NotificationType {
   upload_failed
 }
 
+enum RecordingType {
+  full
+  qualify_only
+  close_only
+  split
+}
+
 model Organization {
   id        String   @id @default(cuid())
   name      String
@@ -68,6 +75,7 @@ model Upload {
   outcome           String
   audioR2Key        String
   audioFilename     String
+  recordingType     RecordingType  @default(full)
   audioSizeBytes    Int
   status            String
   chunkCount        Int?
