@@ -138,7 +138,44 @@ export default function UploadForm(_props: Props) {
     return null;
   }
 
-  function onSubmit(e: React.FormEvent) {
+  // PUT a file to a presigned R2 URL with upload progress. Resolves on
+  // 2xx; rejects with a typed Error on non-2xx / network / abort. Kept
+  // in XHR (not fetch) because the fetch API has no upload-progress
+  // event; we still want the user to see bytes moving.
+  function putWithProgress(
+    url: string,
+    blob: File,
+    onLoaded: (loaded: number) => void,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", url);
+      xhr.upload.addEventListener("progress", (ev) => {
+        if (ev.lengthComputable) onLoaded(ev.loaded);
+      });
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          onLoaded(blob.size);
+          resolve();
+        } else {
+          reject(
+            new Error(
+              `R2 upload failed: HTTP ${xhr.status} ${xhr.statusText || ""}`.trim(),
+            ),
+          );
+        }
+      });
+      xhr.addEventListener("error", () =>
+        reject(new Error("Network error during R2 upload")),
+      );
+      xhr.addEventListener("abort", () =>
+        reject(new Error("Upload was aborted")),
+      );
+      xhr.send(blob);
+    });
+  }
+
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -148,57 +185,85 @@ export default function UploadForm(_props: Props) {
       return;
     }
 
-    const fd = new FormData();
-    fd.append("prospect", prospect.trim());
-    fd.append("consultation_date", consultationDate);
-    fd.append("outcome", outcome);
-    fd.append("recordingType", recordingType);
-    fd.append("audio", file!);
-    if (recordingType === "split" && audioPart2) {
-      fd.append("audio_part2", audioPart2);
-    }
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/upload");
-
-    xhr.upload.addEventListener("progress", (ev) => {
-      if (ev.lengthComputable) {
-        setProgress(Math.round((ev.loaded / ev.total) * 100));
-      }
-    });
-
-    xhr.addEventListener("load", () => {
-      setUploading(false);
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const res = JSON.parse(xhr.responseText) as { upload_id: string };
-          router.push(`/status/${res.upload_id}`);
-        } catch {
-          setError("Server returned an invalid response");
-        }
-      } else {
-        let message = `HTTP ${xhr.status}`;
-        try {
-          const res = JSON.parse(xhr.responseText) as { error?: string };
-          if (res.error) message = res.error;
-        } catch {}
-        setError(message);
-      }
-    });
-
-    xhr.addEventListener("error", () => {
-      setUploading(false);
-      setError("Network error during upload");
-    });
-
-    xhr.addEventListener("abort", () => {
-      setUploading(false);
-      setError("Upload was aborted");
-    });
-
     setUploading(true);
     setProgress(0);
-    xhr.send(fd);
+
+    try {
+      // Step 1 — presign: send metadata only, get back the uploadId and
+      // one or two R2 PUT URLs.
+      const presignRes = await fetch("/api/upload/presign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prospect: prospect.trim(),
+          consultation_date: consultationDate,
+          outcome,
+          recordingType,
+          filename: file!.name,
+          filesize: file!.size,
+          filename_part2: audioPart2?.name ?? null,
+          filesize_part2: audioPart2?.size ?? null,
+        }),
+      });
+      if (!presignRes.ok) {
+        let msg = `Presign failed: HTTP ${presignRes.status}`;
+        try {
+          const body = (await presignRes.json()) as { error?: string };
+          if (body.error) msg = body.error;
+        } catch {}
+        throw new Error(msg);
+      }
+      const { uploadId, putUrl, putUrlPart2 } = (await presignRes.json()) as {
+        uploadId: string;
+        putUrl: string;
+        putUrlPart2: string | null;
+      };
+
+      // Step 2 — PUT audio bytes straight to R2. For split, do both
+      // halves sequentially and aggregate progress.
+      const totalBytes = file!.size + (audioPart2?.size ?? 0);
+      let loaded1 = 0;
+      let loaded2 = 0;
+      const updateProgress = () => {
+        setProgress(
+          Math.round(((loaded1 + loaded2) / Math.max(1, totalBytes)) * 100),
+        );
+      };
+
+      await putWithProgress(putUrl, file!, (loaded) => {
+        loaded1 = loaded;
+        updateProgress();
+      });
+
+      if (recordingType === "split" && audioPart2 && putUrlPart2) {
+        await putWithProgress(putUrlPart2, audioPart2, (loaded) => {
+          loaded2 = loaded;
+          updateProgress();
+        });
+      }
+
+      // Step 3 — confirm: flip status from pending_upload to uploaded
+      // and trigger the transcribe pipeline server-side.
+      const confirmRes = await fetch("/api/upload/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uploadId }),
+      });
+      if (!confirmRes.ok) {
+        let msg = `Confirm failed: HTTP ${confirmRes.status}`;
+        try {
+          const body = (await confirmRes.json()) as { error?: string };
+          if (body.error) msg = body.error;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      router.push(`/status/${uploadId}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      setUploading(false);
+    }
   }
 
   const valid = !firstMissing();

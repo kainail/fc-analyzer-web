@@ -22,6 +22,7 @@ import {
   DeleteObjectCommand,
   type GetObjectCommandOutput,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const REGION = "auto";
 
@@ -95,6 +96,24 @@ export async function downloadFromR2(key: string): Promise<Buffer> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
+}
+
+// Presigned PUT URL for direct browser → R2 upload. ContentType is
+// intentionally NOT included in the signature so the browser is free
+// to PUT with whatever content-type the File carries (or none) —
+// otherwise the upload would 403 on header mismatch.
+export async function presignAudioPut(
+  key: string,
+  expiresInSec = 15 * 60,
+): Promise<string> {
+  return getSignedUrl(
+    client(),
+    new PutObjectCommand({
+      Bucket: bucket(),
+      Key: key,
+    }),
+    { expiresIn: expiresInSec },
+  );
 }
 
 export async function deleteFromR2(key: string): Promise<void> {
