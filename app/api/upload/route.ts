@@ -41,6 +41,14 @@ import {
   ALLOWED_AUDIO_EXTENSIONS,
 } from "@/lib/upload-id";
 import { ALLOWED_OUTCOMES } from "@/lib/outcomes";
+import { RecordingType } from "@/lib/generated/prisma/client";
+
+const RECORDING_TYPES = new Set<RecordingType>([
+  "full",
+  "qualify_only",
+  "close_only",
+  "split",
+]);
 
 export const runtime = "nodejs";
 // Don't try to prerender or cache anything from this route — every
@@ -151,6 +159,27 @@ export async function POST(request: Request) {
     );
   }
 
+  // --- Recording type + (optional) part 2 file ----------------------------
+  const recordingTypeRaw =
+    (form.get("recordingType")?.toString() ?? "full").trim();
+  if (!RECORDING_TYPES.has(recordingTypeRaw as RecordingType)) {
+    return Response.json({ error: "Invalid recording type" }, { status: 400 });
+  }
+  const recordingType = recordingTypeRaw as RecordingType;
+
+  const audioPart2Field = form.get("audio_part2");
+  const audioPart2 =
+    audioPart2Field && typeof audioPart2Field !== "string"
+      ? (audioPart2Field as File)
+      : null;
+
+  if (recordingType === "split" && !audioPart2) {
+    return Response.json(
+      { error: "Split recording requires two audio files" },
+      { status: 400 },
+    );
+  }
+
   // --- File validation ----------------------------------------------------
   const audioField = form.get("audio");
   if (!audioField || typeof audioField === "string") {
@@ -184,6 +213,31 @@ export async function POST(request: Request) {
     );
   }
 
+  // Same checks against audioPart2 if a split upload supplied one.
+  if (audioPart2) {
+    const part2Name = audioPart2.name ?? "";
+    if (!isAllowedAudioExtension(part2Name)) {
+      return Response.json(
+        {
+          error: `Part 2 audio must be one of: ${ALLOWED_AUDIO_EXTENSIONS.join(", ")} (got "${part2Name}")`,
+        },
+        { status: 400 },
+      );
+    }
+    if (audioPart2.size <= 0) {
+      return Response.json(
+        { error: "Part 2 audio file is empty" },
+        { status: 400 },
+      );
+    }
+    if (audioPart2.size > MAX_BYTES) {
+      return Response.json(
+        { error: `Part 2 audio file exceeds the 100 MB limit` },
+        { status: 413 },
+      );
+    }
+  }
+
   // --- Buffer the bytes and ship to R2 ------------------------------------
   const ext = extensionFromFilename(audioName)!;
   const audioFilename = `recording.${ext}`;
@@ -191,12 +245,27 @@ export async function POST(request: Request) {
 
   const audioBuffer = Buffer.from(await audio.arrayBuffer());
 
+  // For split uploads, buffer Part 2 alongside Part 1. The Part 2 key
+  // reuses Part 1's extension per spec (`recording_part2.<ext>`),
+  // even if the uploaded file's actual extension differs — both
+  // halves of a consultation should be the same format in practice,
+  // and forcing the same suffix keeps storage tidy.
+  const audioPart2Buffer = audioPart2
+    ? Buffer.from(await audioPart2.arrayBuffer())
+    : null;
+  const audioPart2ContentType = audioPart2
+    ? audioPart2.type || "application/octet-stream"
+    : null;
+
   const uploadId = generateUploadId({
     consultationDate,
     rep: repName,
     outcome,
   });
   const r2Key = audioKey(org.slug, uploadId, audioFilename);
+  const r2KeyPart2 = audioPart2
+    ? audioKey(org.slug, uploadId, `recording_part2.${ext}`)
+    : null;
 
   // R2 first, DB second. A failed R2 upload never leaves a phantom
   // Upload row pointing at a missing object.
@@ -211,6 +280,25 @@ export async function POST(request: Request) {
     );
   }
 
+  if (audioPart2Buffer && audioPart2ContentType && r2KeyPart2) {
+    try {
+      await uploadToR2(
+        r2KeyPart2,
+        audioPart2Buffer,
+        audioPart2ContentType,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[upload] R2 part-2 upload failed for ${uploadId}:`, err);
+      // Part 1 is now orphaned in R2; cron sweep cleanup as
+      // documented elsewhere. Don't try to compensate inline.
+      return Response.json(
+        { error: `Failed to upload part 2 audio to R2: ${msg}` },
+        { status: 500 },
+      );
+    }
+  }
+
   try {
     await prisma.upload.create({
       data: {
@@ -220,6 +308,7 @@ export async function POST(request: Request) {
         prospectName: prospect,
         consultationDate: new Date(`${consultationDate}T00:00:00Z`),
         outcome,
+        recordingType,
         audioR2Key: r2Key,
         audioFilename,
         audioSizeBytes,

@@ -29,18 +29,35 @@ function todayIso(): string {
   return `${y}-${m}-${day}`;
 }
 
+type RecordingTypeOption = "full" | "qualify_only" | "close_only" | "split";
+
+const RECORDING_TYPE_OPTIONS: Array<{
+  value: RecordingTypeOption;
+  label: string;
+}> = [
+  { value: "full", label: "Full Consultation" },
+  { value: "qualify_only", label: "Qualify Only" },
+  { value: "close_only", label: "Close Only" },
+  { value: "split", label: "Split – Two Parts" },
+];
+
 export default function UploadForm(_props: Props) {
   const router = useRouter();
 
   const [prospect, setProspect] = useState("");
   const [consultationDate, setConsultationDate] = useState(todayIso());
   const [outcome, setOutcome] = useState("");
+  const [recordingType, setRecordingType] =
+    useState<RecordingTypeOption>("full");
   const [file, setFile] = useState<File | null>(null);
+  const [audioPart2, setAudioPart2] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [drag, setDrag] = useState(false);
+  const [drag2, setDrag2] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const fileRef2 = useRef<HTMLInputElement>(null);
 
   function acceptFile(f: File | null): boolean {
     if (!f) {
@@ -75,11 +92,49 @@ export default function UploadForm(_props: Props) {
     acceptFile(f);
   }
 
+  // Part 2 mirrors acceptFile / onFileChange / onDrop above. Kept as
+  // parallel functions rather than refactoring acceptFile into a
+  // shared helper so the existing main-file path is untouched.
+  function acceptFilePart2(f: File | null): boolean {
+    if (!f) {
+      setAudioPart2(null);
+      return false;
+    }
+    const ext = f.name.split(".").pop()?.toLowerCase();
+    if (!ext || !ALLOWED_EXT.includes(ext)) {
+      setError(`Part 2 audio must be one of: ${ALLOWED_EXT.join(", ")} (got "${f.name}")`);
+      setAudioPart2(null);
+      return false;
+    }
+    if (f.size > MAX_BYTES) {
+      setError(`Part 2 file too large: ${fmtFileSize(f.size)} exceeds the 100 MB limit`);
+      setAudioPart2(null);
+      return false;
+    }
+    setError(null);
+    setAudioPart2(f);
+    return true;
+  }
+
+  function onFileChangePart2(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null;
+    if (!acceptFilePart2(f)) e.target.value = "";
+  }
+
+  function onDrop2(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDrag2(false);
+    const f = e.dataTransfer.files?.[0] ?? null;
+    acceptFilePart2(f);
+  }
+
   function firstMissing(): string | null {
     if (!prospect.trim()) return "Prospect is required";
     if (!consultationDate) return "Consultation date is required";
     if (!outcome) return "Outcome is required";
     if (!file) return "Audio file is required";
+    if (recordingType === "split" && !audioPart2)
+      return "Part 2 audio is required for split uploads";
     return null;
   }
 
@@ -97,7 +152,11 @@ export default function UploadForm(_props: Props) {
     fd.append("prospect", prospect.trim());
     fd.append("consultation_date", consultationDate);
     fd.append("outcome", outcome);
+    fd.append("recordingType", recordingType);
     fd.append("audio", file!);
+    if (recordingType === "split" && audioPart2) {
+      fd.append("audio_part2", audioPart2);
+    }
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload");
@@ -213,6 +272,27 @@ export default function UploadForm(_props: Props) {
           </div>
 
           <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <label className="label" htmlFor="recording-type">
+              Recording Type <span className="req">*</span>
+            </label>
+            <select
+              id="recording-type"
+              className="select"
+              value={recordingType}
+              onChange={(e) =>
+                setRecordingType(e.target.value as RecordingTypeOption)
+              }
+              disabled={uploading}
+            >
+              {RECORDING_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
             <label className="label">
               Audio file <span className="req">*</span>
               <span className="hint">
@@ -313,6 +393,114 @@ export default function UploadForm(_props: Props) {
               />
             </div>
           </div>
+
+          {recordingType === "split" && (
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label className="label">
+                Part 2 Audio <span className="req">*</span>
+                <span className="hint">
+                  Same formats — up to 100 MB
+                </span>
+              </label>
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (!uploading) setDrag2(true);
+                }}
+                onDragLeave={() => setDrag2(false)}
+                onDrop={(e) => {
+                  if (uploading) return;
+                  onDrop2(e);
+                }}
+                onClick={() => {
+                  if (!uploading) fileRef2.current?.click();
+                }}
+                style={{
+                  border: `1.5px dashed ${drag2 ? "var(--primary)" : "var(--border-strong)"}`,
+                  background: drag2
+                    ? "var(--primary-50)"
+                    : "var(--surface-2)",
+                  borderRadius: "var(--r-md)",
+                  padding: 24,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 16,
+                  cursor: uploading ? "not-allowed" : "pointer",
+                  transition: "background 100ms, border-color 100ms",
+                  opacity: uploading ? 0.7 : 1,
+                }}
+              >
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 10,
+                    background: audioPart2
+                      ? "var(--score-green-bg)"
+                      : "var(--primary-50)",
+                    color: audioPart2
+                      ? "var(--score-green)"
+                      : "var(--primary)",
+                    display: "grid",
+                    placeItems: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {audioPart2 ? <CheckCirc size={22} /> : <Mic size={22} />}
+                </div>
+                {audioPart2 ? (
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        fontWeight: 500,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {audioPart2.name}
+                    </div>
+                    <div className="muted mono" style={{ fontSize: 12 }}>
+                      {fmtFileSize(audioPart2.size)} · part 2 ready
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 500 }}>
+                      Drop part 2 here, or click to browse
+                    </div>
+                    <div className="muted" style={{ fontSize: 12.5 }}>
+                      Second half of the consultation
+                    </div>
+                  </div>
+                )}
+                {audioPart2 ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAudioPart2(null);
+                      if (fileRef2.current) fileRef2.current.value = "";
+                    }}
+                    disabled={uploading}
+                  >
+                    <X size={14} /> Remove
+                  </button>
+                ) : (
+                  <span className="kbd">browse</span>
+                )}
+                <input
+                  ref={fileRef2}
+                  type="file"
+                  accept=".mp3,.m4a,.wav,.ogg,.aac,.flac,audio/*"
+                  hidden
+                  onChange={onFileChangePart2}
+                  disabled={uploading}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {uploading && (
