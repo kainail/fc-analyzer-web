@@ -166,11 +166,35 @@ function Row({ row }: { row: DashboardRow }) {
         {row.gym}
       </div>
 
-      <div>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          alignItems: "flex-start",
+        }}
+      >
         <span className={`chip ${sold ? "chip-sold" : "chip-notsold"}`}>
           <span className="dot" />
           {row.outcome}
         </span>
+        {row.recording_type !== "full" && (
+          <span
+            className="chip"
+            style={{
+              fontSize: 10,
+              background: "var(--surface-sunken)",
+              color: "var(--ink-4)",
+              fontWeight: 500,
+            }}
+          >
+            {row.recording_type === "qualify_only"
+              ? "Qualify"
+              : row.recording_type === "close_only"
+                ? "Close"
+                : "Split"}
+          </span>
+        )}
       </div>
 
       <div style={{ display: "flex", justifyContent: "center" }}>

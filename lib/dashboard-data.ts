@@ -23,6 +23,7 @@ export type RowMetadata = {
   prospect: string;
   consultation_date: string;
   outcome: string;
+  recording_type: string;
   status: string;
   analyzed_at?: string;
   json_parse_error?: string;
@@ -231,6 +232,7 @@ export async function listAnalyzedUploads(
       prospect: row.prospectName,
       consultation_date: row.consultationDate.toISOString().slice(0, 10),
       outcome: row.outcome,
+      recording_type: row.recordingType,
       status: row.status,
       analyzed_at: a?.analyzedAt?.toISOString(),
       json_parse_error: a?.jsonParseError ?? undefined,

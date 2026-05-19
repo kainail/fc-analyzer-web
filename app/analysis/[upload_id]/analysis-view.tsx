@@ -32,6 +32,7 @@ export type AnalysisMetadata = {
   status: string;
   analyzed_at?: string;
   json_parse_error?: string;
+  recordingType?: string;
   analysis_json_path?: string;
   coaching_path?: string;
 };
@@ -52,6 +53,9 @@ type StageScore = {
   what_worked: string;
   what_was_missed: string;
   upstream_consequences: string | null;
+  phase?: string;
+  applicable?: boolean;
+  reason?: string;
 };
 
 type CrossCuttingScore = {
@@ -331,6 +335,54 @@ function StageRow({
   const [expanded, setExpanded] = useState(false);
   const band = scoreBand(entry.score);
   const label = STAGE_LABELS[entry.stage] ?? entry.stage;
+
+  if (entry.applicable === false) {
+    return (
+      <div
+        style={{
+          borderTop: index === 0 ? "none" : "1px solid var(--divider)",
+          padding: "12px 20px",
+          display: "grid",
+          gridTemplateColumns: "32px 1fr 160px 56px 18px",
+          alignItems: "center",
+          gap: 14,
+          opacity: 0.45,
+        }}
+      >
+        <span className="mono faint" style={{ fontSize: 11 }}>
+          {String(index + 1).padStart(2, "0")}
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontWeight: 500,
+              fontSize: 13.5,
+              color: "var(--ink-4)",
+            }}
+          >
+            {label}
+          </div>
+        </div>
+        <span className="mono faint" style={{ fontSize: 12 }}>
+          —
+        </span>
+        <span
+          className="chip"
+          style={{
+            justifySelf: "end",
+            fontSize: 10,
+            background: "var(--surface-sunken)",
+            color: "var(--ink-4)",
+            fontWeight: 500,
+          }}
+        >
+          Not recorded
+        </span>
+        <span />
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -896,6 +948,21 @@ export default function AnalysisView({
   const predictedSold = isSoldOutcome(json.predicted_outcome.bucket);
   const predictionMatched = predictedSold === sold;
   const overallBand = scoreBand(overall);
+  const applicableCount = json.stage_scores.filter(
+    (s) => s.applicable !== false,
+  ).length;
+  const stageSubtitle =
+    applicableCount === 9
+      ? "All 9 stages scored"
+      : `${applicableCount} of 9 stages scored`;
+  const recordingLabel =
+    metadata.recordingType === "qualify_only"
+      ? "Qualify only"
+      : metadata.recordingType === "close_only"
+        ? "Close only"
+        : metadata.recordingType === "split"
+          ? "Split"
+          : null;
 
   return (
     <div className="content">
@@ -1096,9 +1163,32 @@ export default function AnalysisView({
               </span>
             }
           />
+          {recordingLabel && (
+            <MetaInline
+              label="Recording"
+              value={
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    background: "rgba(255,255,255,0.14)",
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    fontWeight: 500,
+                  }}
+                >
+                  {recordingLabel}
+                </span>
+              }
+            />
+          )}
           <MetaInline
             label="Weak stages"
-            value={weakStages === 0 ? "None — exemplar" : `${weakStages} of 9`}
+            value={
+              weakStages === 0
+                ? "None — exemplar"
+                : `${weakStages} of ${applicableCount}`
+            }
           />
         </div>
       </div>
@@ -1225,7 +1315,7 @@ export default function AnalysisView({
       <Collapsible
         id="stages"
         title="Stage scores"
-        subtitle="9 stages of the consultation framework"
+        subtitle={stageSubtitle}
         defaultOpen={true}
         meta={
           <span className="mono faint" style={{ fontSize: 12 }}>

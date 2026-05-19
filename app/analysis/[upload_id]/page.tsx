@@ -164,6 +164,7 @@ export default async function AnalysisPage({
     status: upload.status,
     analyzed_at: upload.analysis.analyzedAt?.toISOString(),
     json_parse_error: upload.analysis.jsonParseError ?? undefined,
+    recordingType: upload.recordingType,
   };
 
   const parseError = isParseErrorJson(json);
