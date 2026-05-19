@@ -42,6 +42,7 @@
  * and the Upload row stays at "transcribing" — the startup recovery
  * sweep (lib/startup-recovery.ts) picks those up.
  */
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -60,8 +61,102 @@ import {
 import {
   chunkAudio,
   probeFfmpeg,
+  resolveFfmpegBinary,
   type AudioChunk,
 } from "@/lib/audio-chunker";
+
+// Map a Part 1 R2 key to its Part 2 sibling.
+//   part1Key:  uploads/<orgSlug>/<uploadId>/recording.<ext>
+//   part2Key:  uploads/<orgSlug>/<uploadId>/recording_part2.<ext>
+function derivePart2Key(part1Key: string): string {
+  return part1Key.replace(/\/recording\./, "/recording_part2.");
+}
+
+// Concatenate two audio Buffers into a single Buffer via ffmpeg's
+// concat demuxer with -c copy (stream copy, no re-encode). Both
+// parts MUST share container + codec — practically that's the case
+// for a single consultation recorded in two halves on the same
+// device. If they don't match, ffmpeg's exit code is non-zero and
+// the captured stderr is bubbled up as the error message.
+//
+// `extension` is the file extension (without the leading dot) that
+// ffmpeg uses to infer the output container — pass the same ext as
+// Part 1's audioFilename (e.g. "m4a", "mp3").
+//
+// Everything happens inside a private temp directory that's wiped
+// in finally, so this helper leaves no working files behind on any
+// exit path.
+async function stitchAudioParts(
+  part1: Buffer,
+  part2: Buffer,
+  ffmpegPath: string,
+  extension: string,
+): Promise<Buffer> {
+  const ext = extension.replace(/^\./, "");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fc-stitch-"));
+  const part1Path = path.join(dir, `part1.${ext}`);
+  const part2Path = path.join(dir, `part2.${ext}`);
+  const listPath = path.join(dir, "filelist.txt");
+  const outPath = path.join(dir, `stitched.${ext}`);
+
+  try {
+    fs.writeFileSync(part1Path, part1);
+    fs.writeFileSync(part2Path, part2);
+    // Concat-demuxer filelist syntax: `file '<path>'` per line.
+    // Single quotes guard against any spaces/specials in the path.
+    fs.writeFileSync(
+      listPath,
+      `file '${part1Path}'\nfile '${part2Path}'\n`,
+    );
+
+    const args = [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      listPath,
+      "-c",
+      "copy",
+      outPath,
+    ];
+
+    const result = await new Promise<{ code: number; stderr: string }>(
+      (resolve) => {
+        let stderr = "";
+        const proc = spawn(ffmpegPath, args, { windowsHide: true });
+        proc.stderr.on("data", (d) => {
+          stderr += d.toString();
+        });
+        proc.stdout.resume();
+        proc.on("error", (err) => {
+          resolve({ code: -1, stderr: `${stderr}\n${err}` });
+        });
+        proc.on("close", (code) => {
+          resolve({ code: code ?? -1, stderr });
+        });
+      },
+    );
+
+    if (result.code !== 0) {
+      throw new Error(
+        `ffmpeg concat failed (exit ${result.code}): ${result.stderr.trim() || "no stderr"}`,
+      );
+    }
+
+    return fs.readFileSync(outPath);
+  } finally {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch (cleanupErr) {
+      console.error("[transcribe] stitch temp dir cleanup failed:", cleanupErr);
+    }
+  }
+}
 
 const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
 const WHISPER_TIMEOUT_MS = 5 * 60 * 1000;
@@ -198,7 +293,7 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
       return;
     }
 
-    const needsChunking = upload.audioSizeBytes > WHISPER_MAX_BYTES;
+    let needsChunking = upload.audioSizeBytes > WHISPER_MAX_BYTES;
     console.log(
       `[transcribe] ${uploadId}: audio=${upload.audioFilename} size=${upload.audioSizeBytes}B needsChunking=${needsChunking}`,
     );
@@ -207,7 +302,57 @@ export async function transcribeUpload(uploadId: string): Promise<void> {
     failingStep = "download audio from R2";
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `fc-transcribe-${uploadId}-`));
     const audioPath = path.join(tmpDir, upload.audioFilename);
-    const audioBuffer = await downloadFromR2(upload.audioR2Key);
+    let audioBuffer = await downloadFromR2(upload.audioR2Key);
+
+    // Split recordings ship two R2 objects (recording.<ext> +
+    // recording_part2.<ext>). Stitch them into a single file via the
+    // ffmpeg concat demuxer BEFORE the rest of the pipeline runs —
+    // chunking, transcription, segment offsetting, etc. all stay
+    // unaware that this upload started life as two parts.
+    if (upload.recordingType === "split") {
+      failingStep = "resolve ffmpeg for stitch";
+      const ffmpegPath = await resolveFfmpegBinary();
+      if (!ffmpegPath) {
+        console.error(
+          `[transcribe] ${uploadId}: ffmpeg unavailable, cannot stitch split parts`,
+        );
+        await writeUploadError(uploadId, FFMPEG_MISSING_ERROR_MESSAGE);
+        return;
+      }
+
+      failingStep = "download part 2 from R2";
+      const part2Key = derivePart2Key(upload.audioR2Key);
+      const part2Buffer = await downloadFromR2(part2Key);
+
+      failingStep = "stitch split parts";
+      const ext =
+        upload.audioFilename.split(".").pop()?.toLowerCase() ?? "mp3";
+      console.log(
+        `[transcribe] ${uploadId}: stitching split parts (${audioBuffer.length}B + ${part2Buffer.length}B, .${ext})`,
+      );
+      audioBuffer = await stitchAudioParts(
+        audioBuffer,
+        part2Buffer,
+        ffmpegPath,
+        ext,
+      );
+      console.log(
+        `[transcribe] ${uploadId}: stitched buffer is ${audioBuffer.length}B`,
+      );
+
+      // upload.audioSizeBytes only counts Part 1 — recompute against
+      // the stitched buffer so a split where Part 1 alone fits under
+      // Whisper's 25 MB cap but Part 1 + Part 2 doesn't still goes
+      // through the chunking path.
+      const stitchedNeedsChunking = audioBuffer.byteLength > WHISPER_MAX_BYTES;
+      if (stitchedNeedsChunking !== needsChunking) {
+        console.log(
+          `[transcribe] ${uploadId}: needsChunking ${needsChunking} → ${stitchedNeedsChunking} after stitch (${audioBuffer.byteLength}B)`,
+        );
+      }
+      needsChunking = stitchedNeedsChunking;
+    }
+
     fs.writeFileSync(audioPath, audioBuffer);
 
     const chunksDir = path.join(tmpDir, "chunks");

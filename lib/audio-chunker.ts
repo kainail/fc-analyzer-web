@@ -95,7 +95,7 @@ function tryRunFfmpeg(
   });
 }
 
-async function resolveFfmpegBinary(): Promise<string | null> {
+export async function resolveFfmpegBinary(): Promise<string | null> {
   if (resolvedFfmpegPath !== undefined) return resolvedFfmpegPath;
 
   const candidates: string[] = [];
