@@ -215,6 +215,9 @@ export async function analyzeUpload(uploadId: string): Promise<void> {
 
   let failingStep = "load upload + transcript";
   try {
+    // include (no explicit select) returns every Upload scalar by
+    // default, so upload.recordingType is in scope downstream where
+    // the user-message prefix branches on it.
     const upload = await prisma.upload.findUnique({
       where: { id: uploadId },
       include: { org: true, transcript: true },
@@ -247,12 +250,34 @@ export async function analyzeUpload(uploadId: string): Promise<void> {
     failingStep = "build system prompt";
     const systemBlocks = buildSystemPrompt();
 
-    const userMessage = [
-      `transcript_id: ${uploadId}`,
-      "",
-      "TRANSCRIPT:",
-      transcript,
-    ].join("\n");
+    const recordingTypeLabels: Record<string, string> = {
+      full: "Full consultation (qualify + workout + close)",
+      qualify_only: "Qualify only (stages 1–4; stages 5–9 are not_applicable)",
+      close_only: "Close only (stages 5–9; stages 1–4 are not_applicable)",
+      split: "Split recording — two parts stitched into one transcript (treat as full; all stages apply)",
+    };
+
+    const recordingHeader = `RECORDING TYPE: ${recordingTypeLabels[upload.recordingType] ?? "full"}
+
+Apply the recording type phase map defined in the stage rubric.
+Score only the stages listed as applicable for this recording type.
+For every stage outside the applicable set, output the not_applicable
+JSON format defined in the stage rubric output requirement section.
+The overall score must be the average of scored stages only —
+exclude not_applicable stages from the denominator.
+${upload.recordingType === "qualify_only" ? "Because this is a qualify-only recording, set predicted_outcome.bucket to incomplete and note that the close was not captured." : ""}
+---
+
+`;
+
+    const userMessage =
+      recordingHeader +
+      [
+        `transcript_id: ${uploadId}`,
+        "",
+        "TRANSCRIPT:",
+        transcript,
+      ].join("\n");
 
     failingStep = "anthropic call";
     console.log(`[analyze] ${uploadId}: calling Claude`);
