@@ -45,11 +45,12 @@ model Organization {
   slug      String   @unique
   createdAt DateTime @default(now())
 
-  memberships   Membership[]
-  uploads       Upload[]
-  transcripts   Transcript[]
-  analyses      Analysis[]
-  notifications Notification[]
+  memberships      Membership[]
+  uploads          Upload[]
+  transcripts      Transcript[]
+  analyses         Analysis[]
+  notifications    Notification[]
+  roleplaySessions RoleplaySession[]
 }
 
 model Membership {
@@ -84,10 +85,11 @@ model Upload {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  transcript    Transcript?
-  analysis      Analysis?
-  notifications Notification[]
+  org              Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  transcript       Transcript?
+  analysis         Analysis?
+  notifications    Notification[]
+  roleplaySessions RoleplaySession[]
 
   @@index([orgId, status])
   @@index([orgId, createdAt])
@@ -165,4 +167,51 @@ model Analysis {
   upload Upload       @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+}
+
+model RoleplaySession {
+  id                 String   @id @default(cuid())
+  uploadId           String
+  orgId              String
+  repUserId          String
+  mode               String // "multiple_choice" | "text" | "voice"
+  archetype          String
+  startingResistance Int
+  finalResistance    Int?
+  outcome            String? // "win" | "loss_walkout" | "loss_timeout" | "draw"
+  totalTurns         Int?
+  strongMoves        Int?
+  competentMoves     Int?
+  weakMoves          Int?
+  criticalMoves      Int?
+  xpEarned           Int?
+  stageObjectiveMet  String? // "met" | "partially_met" | "not_met"
+  reportR2Key        String? // final report JSON stored in R2
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  org    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  upload Upload         @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  turns  RoleplayTurn[]
+
+  @@index([orgId])
+  @@index([uploadId])
+  @@index([repUserId])
+}
+
+model RoleplayTurn {
+  id              String   @id @default(cuid())
+  sessionId       String
+  turnNumber      Int
+  role            String // "prospect" | "rep"
+  content         String
+  floatingLabel   String? // "STRONG" | "COMPETENT" | "WEAK" | "CRITICAL"
+  resistanceDelta Int?
+  resistanceAfter Int?
+  turnFeedback    String?
+  createdAt       DateTime @default(now())
+
+  session RoleplaySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
 }
