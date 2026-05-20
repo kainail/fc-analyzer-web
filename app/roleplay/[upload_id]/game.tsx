@@ -905,69 +905,6 @@ function ProspectSpriteArea({
   );
 }
 
-function DialogBoxWrapper({ children }: { children: React.ReactNode }) {
-  // Zone 4 is 48px tall total. We strip every padding down to 1 and
-  // enforce overflow: hidden at both wrapper levels so text + MC rows
-  // can never escape the box. Press Start 2P at 6px renders taller
-  // than its declared size (font metric leading); dropping the dialog
-  // body to 5px is what actually keeps 4-line prospect dialog and
-  // 4-row MC option lists inside the bordered region.
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        height: 48,
-        background: "#0f380f",
-        borderTop: "1px solid #9bbc0f",
-        boxSizing: "border-box",
-        padding: 1,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          border: "1px solid #9bbc0f",
-          padding: 1,
-          boxSizing: "border-box",
-          position: "relative",
-          background: "#0f380f",
-          overflow: "hidden",
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function BlinkArrow({
-  position,
-}: {
-  position: "br" | "bl";
-}) {
-  return (
-    <div
-      className="fc-blink"
-      style={{
-        position: "absolute",
-        bottom: 2,
-        right: position === "br" ? 4 : undefined,
-        left: position === "bl" ? 4 : undefined,
-        fontSize: 6,
-        color: "#9bbc0f",
-        fontFamily: "var(--font-pixel), monospace",
-      }}
-    >
-      ▼
-    </div>
-  );
-}
-
 // ───────────────────────────────────────────────────────────────────
 // Battle view component
 // ───────────────────────────────────────────────────────────────────
@@ -1012,123 +949,195 @@ function BattleView(props: {
     props.dialog.kind === "prospect_speaking" && !props.dialog.done,
   );
 
+  // Canvas now hosts only zones 1-3 (160×96). The dialog box (formerly
+  // zone 4) renders as standard HTML below the canvas at readable
+  // font sizes — Press Start 2P at 5-6px virtual was unworkable for
+  // anything longer than a sentence.
+  const [scale, setScale] = useState(3);
+  useEffect(() => {
+    const recompute = () => {
+      const wAvail = window.innerWidth - 32;
+      // Reserve ~280px for the HTML dialog box + page padding.
+      const hAvail = window.innerHeight - 280;
+      const s = Math.max(
+        2,
+        Math.min(6, Math.floor(Math.min(wAvail / 160, hAvail / 96))),
+      );
+      setScale(s);
+    };
+    recompute();
+    window.addEventListener("resize", recompute);
+    return () => window.removeEventListener("resize", recompute);
+  }, []);
+
   return (
-    <PixelCanvas>
-      {/* Zone 1: prospect header */}
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "var(--bg)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        padding: 16,
+        gap: 16,
+        overflow: "auto",
+      }}
+    >
       <div
         style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 16,
-          padding: "4px 4px 0",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          boxSizing: "border-box",
+          width: 160 * scale,
+          height: 96 * scale,
+          position: "relative",
+          flexShrink: 0,
         }}
       >
-        <PixelText
-          size={6}
-          style={{
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "clip",
-            minWidth: 0,
-          }}
-        >
-          {truncatedName}
-        </PixelText>
         <div
           style={{
-            display: "flex",
-            gap: 4,
-            alignItems: "center",
-            flexShrink: 0,
+            width: 160,
+            height: 96,
+            background: "#0f380f",
+            position: "absolute",
+            top: 0,
+            left: 0,
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+            imageRendering: "pixelated",
+            overflow: "hidden",
+            color: "#9bbc0f",
+            fontFamily: "var(--font-pixel), monospace",
           }}
         >
-          <PixelText size={6}>RES</PixelText>
-          <ResistanceBar value={props.resistance} flash={props.resistanceFlash} />
+          {/* Zone 1: prospect header */}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 16,
+              padding: "4px 4px 0",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              boxSizing: "border-box",
+            }}
+          >
+            <PixelText
+              size={6}
+              style={{
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "clip",
+                minWidth: 0,
+              }}
+            >
+              {truncatedName}
+            </PixelText>
+            <div
+              style={{
+                display: "flex",
+                gap: 4,
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <PixelText size={6}>RES</PixelText>
+              <ResistanceBar
+                value={props.resistance}
+                flash={props.resistanceFlash}
+              />
+            </div>
+          </div>
+
+          {/* Zone 2: sprite area + floating label */}
+          <ProspectSpriteArea
+            archetype={props.archetype}
+            animation={props.animation}
+            palette={palette}
+            speakingFrame={speakingFrame}
+          />
+          {props.pendingLabel ? (
+            <FloatingLabelDisplay
+              keyId={props.pendingLabel.keyId}
+              label={props.pendingLabel.label}
+              delta={props.pendingLabel.delta}
+              shake={props.pendingLabel.label === "CRITICAL"}
+            />
+          ) : null}
+
+          {/* Zone 3: rep header (now flush with the bottom of the canvas) */}
+          <div
+            style={{
+              position: "absolute",
+              top: 80,
+              left: 0,
+              right: 0,
+              height: 16,
+              padding: "4px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              boxSizing: "border-box",
+              borderTop: "1px solid #306230",
+            }}
+          >
+            <PixelText
+              size={6}
+              style={{
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "clip",
+                minWidth: 0,
+              }}
+            >
+              YOU {repFirst}
+            </PixelText>
+            <div
+              style={{
+                display: "flex",
+                gap: 4,
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <PixelText size={6}>CON</PixelText>
+              <ResistanceBar value={props.confidence} flash={false} />
+            </div>
+          </div>
+
+          {/* scanline overlay (inside the scaled canvas only) */}
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+              backgroundImage:
+                "repeating-linear-gradient(180deg, rgba(0,0,0,0.15) 0, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px)",
+              mixBlendMode: "multiply",
+            }}
+          />
         </div>
       </div>
 
-      {/* Zone 2: sprite area + floating label */}
-      <ProspectSpriteArea
-        archetype={props.archetype}
-        animation={props.animation}
-        palette={palette}
-        speakingFrame={speakingFrame}
+      <HtmlDialogBox
+        prospectName={props.prospectName}
+        dialog={props.dialog}
+        textInputValue={props.textInputValue}
+        voicePhase={props.voicePhase}
+        voiceTranscript={props.voiceTranscript}
+        voiceError={props.voiceError}
+        onAdvanceProspect={props.onAdvanceProspect}
+        onSelectMc={props.onSelectMc}
+        onChangeText={props.onChangeText}
+        onSubmitText={props.onSubmitText}
+        onVoicePress={props.onVoicePress}
+        onVoiceRelease={props.onVoiceRelease}
+        onVoiceConfirm={props.onVoiceConfirm}
+        onVoiceRetry={props.onVoiceRetry}
       />
-      {props.pendingLabel ? (
-        <FloatingLabelDisplay
-          keyId={props.pendingLabel.keyId}
-          label={props.pendingLabel.label}
-          delta={props.pendingLabel.delta}
-          shake={props.pendingLabel.label === "CRITICAL"}
-        />
-      ) : null}
-
-      {/* Zone 3: rep header */}
-      <div
-        style={{
-          position: "absolute",
-          top: 80,
-          left: 0,
-          right: 0,
-          height: 16,
-          padding: "4px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          boxSizing: "border-box",
-          borderTop: "1px solid #306230",
-          borderBottom: "1px solid #306230",
-        }}
-      >
-        <PixelText
-          size={6}
-          style={{
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "clip",
-            minWidth: 0,
-          }}
-        >
-          YOU {repFirst}
-        </PixelText>
-        <div
-          style={{
-            display: "flex",
-            gap: 4,
-            alignItems: "center",
-            flexShrink: 0,
-          }}
-        >
-          <PixelText size={6}>CON</PixelText>
-          <ResistanceBar value={props.confidence} flash={false} />
-        </div>
-      </div>
-
-      {/* Zone 4: dialog */}
-      <DialogBoxWrapper>
-        <DialogContent
-          dialog={props.dialog}
-          textInputValue={props.textInputValue}
-          voicePhase={props.voicePhase}
-          voiceTranscript={props.voiceTranscript}
-          voiceError={props.voiceError}
-          onAdvanceProspect={props.onAdvanceProspect}
-          onSelectMc={props.onSelectMc}
-          onChangeText={props.onChangeText}
-          onSubmitText={props.onSubmitText}
-          onVoicePress={props.onVoicePress}
-          onVoiceRelease={props.onVoiceRelease}
-          onVoiceConfirm={props.onVoiceConfirm}
-          onVoiceRetry={props.onVoiceRetry}
-        />
-      </DialogBoxWrapper>
-    </PixelCanvas>
+    </div>
   );
 }
 
@@ -1149,7 +1158,16 @@ function useSpeakingFrame(active: boolean): number {
   return frame;
 }
 
-function DialogContent(props: {
+// ───────────────────────────────────────────────────────────────────
+// HTML dialog box — renders BELOW the pixel canvas at readable sizes.
+// All Press Start 2P, dark-mode styled, no scaling. The pixel canvas
+// keeps its retro feel; the dialog gets HTML-native legibility.
+// ───────────────────────────────────────────────────────────────────
+
+const DIALOG_BORDER = "#8bac0f";
+
+function HtmlDialogBox(props: {
+  prospectName: string;
   dialog: DialogMode;
   textInputValue: string;
   voicePhase: VoicePhase;
@@ -1165,315 +1183,385 @@ function DialogContent(props: {
   onVoiceRetry: () => void;
 }) {
   const { dialog } = props;
-
-  if (dialog.kind === "prospect_speaking" || dialog.kind === "exit_line") {
-    const shown = dialog.text.slice(0, dialog.charsShown);
-    return (
-      <div
-        onClick={props.onAdvanceProspect}
-        style={{
-          position: "absolute",
-          inset: 0,
-          padding: 1,
-          paddingRight: 7,
-          cursor: dialog.done ? "pointer" : "default",
-          overflow: "hidden",
-        }}
-      >
-        <PixelText
-          size={5}
-          style={{
-            display: "block",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            lineHeight: 1.2,
-          }}
-        >
-          {shown}
-        </PixelText>
-        {dialog.done ? <BlinkArrow position="br" /> : null}
-      </div>
-    );
-  }
-
-  if (dialog.kind === "rep_input_mc") {
-    // Each row holds up to 2 wrapped lines of 5px text (lineHeight 1
-    // = 10px box). 4 rows × 10px = 40px and the dialog content area
-    // is ~41px after padding + borders, so this is the snuggest fit
-    // that doesn't overflow. We drop the outer wrapper padding to 0
-    // to give every available pixel to the rows. Any 3rd wrapped line
-    // gets clipped by the row's overflow: hidden.
-    return (
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 720,
+        minHeight: 120,
+        background: "var(--surface-2)",
+        border: `2px solid ${DIALOG_BORDER}`,
+        borderRadius: 6,
+        padding: 16,
+        boxSizing: "border-box",
+        fontFamily: "var(--font-pixel), monospace",
+        color: "var(--ink)",
+      }}
+    >
       <div
         style={{
-          position: "absolute",
-          inset: 0,
-          padding: 0,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
+          fontSize: 10,
+          letterSpacing: "0.12em",
+          color: "var(--ink-4)",
+          marginBottom: 12,
+          textTransform: "uppercase",
         }}
       >
-        {dialog.options.slice(0, 4).map((opt) => (
-          <button
-            key={opt.id}
-            type="button"
-            onClick={() => props.onSelectMc(opt)}
-            className="fc-mc-row"
-            style={{
-              background: "transparent",
-              border: "none",
-              padding: 0,
-              margin: 0,
-              textAlign: "left",
-              cursor: "pointer",
-              height: 10,
-              minHeight: 10,
-              maxHeight: 10,
-              lineHeight: 1,
-              display: "block",
-              width: "100%",
-              maxWidth: "100%",
-              overflow: "hidden",
-            }}
-          >
-            <PixelText
-              size={5}
-              style={{
-                display: "block",
-                whiteSpace: "normal",
-                wordBreak: "break-word",
-                lineHeight: 1,
-                width: "100%",
-                maxWidth: "100%",
-                minWidth: 0,
-              }}
-            >
-              {`> ${opt.text}`}
-            </PixelText>
-          </button>
-        ))}
+        {props.prospectName}
       </div>
-    );
-  }
-
-  if (dialog.kind === "rep_input_text") {
-    const count = props.textInputValue.length;
-    return (
-      <div style={{ position: "absolute", inset: 0, padding: 4 }}>
-        <textarea
-          autoFocus
-          value={props.textInputValue}
-          maxLength={TEXT_MAX_LEN}
-          onChange={(e) => props.onChangeText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              props.onSubmitText();
-            }
-          }}
-          placeholder="TYPE YOUR REPLY"
-          style={{
-            width: "100%",
-            height: 26,
-            background: "transparent",
-            color: "#9bbc0f",
-            border: "none",
-            outline: "none",
-            resize: "none",
-            fontFamily: "var(--font-pixel), monospace",
-            fontSize: 6,
-            lineHeight: 1.4,
-            padding: 0,
-            caretColor: "#9bbc0f",
-          }}
+      {dialog.kind === "prospect_speaking" || dialog.kind === "exit_line" ? (
+        <HtmlProspectLine
+          text={dialog.text}
+          charsShown={dialog.charsShown}
+          done={dialog.done}
+          onAdvance={props.onAdvanceProspect}
         />
+      ) : null}
+      {dialog.kind === "rep_input_mc" ? (
+        <HtmlMcOptions
+          options={dialog.options}
+          onSelect={props.onSelectMc}
+        />
+      ) : null}
+      {dialog.kind === "rep_input_text" ? (
+        <HtmlTextInput
+          value={props.textInputValue}
+          onChange={props.onChangeText}
+          onSubmit={props.onSubmitText}
+        />
+      ) : null}
+      {dialog.kind === "rep_input_voice" ? (
+        <HtmlVoiceInput
+          phase={props.voicePhase}
+          transcript={props.voiceTranscript}
+          error={props.voiceError}
+          onPress={props.onVoicePress}
+          onRelease={props.onVoiceRelease}
+          onConfirm={props.onVoiceConfirm}
+          onRetry={props.onVoiceRetry}
+        />
+      ) : null}
+      {dialog.kind === "evaluating" ? (
         <div
           style={{
-            position: "absolute",
-            bottom: 2,
-            left: 4,
-            right: 4,
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
+            justifyContent: "center",
+            padding: "24px 0",
+            fontSize: 12,
+            color: "var(--ink-3)",
           }}
         >
-          <PixelText size={6} color="#306230">
-            {count}/{TEXT_MAX_LEN}
-          </PixelText>
-          <button
-            type="button"
-            onClick={props.onSubmitText}
-            disabled={count === 0}
-            style={{
-              background: "transparent",
-              border: "none",
-              cursor: count === 0 ? "not-allowed" : "pointer",
-              padding: 0,
-            }}
-          >
-            <PixelText size={6} color={count === 0 ? "#306230" : "#9bbc0f"}>
-              SEND ►
-            </PixelText>
-          </button>
+          EVALUATING<span className="fc-dots" />
         </div>
-      </div>
-    );
-  }
+      ) : null}
+      {dialog.kind === "coaching" ? (
+        <HtmlCoachingDialog text={dialog.text} />
+      ) : null}
+    </div>
+  );
+}
 
-  if (dialog.kind === "rep_input_voice") {
-    return (
-      <div
+function HtmlProspectLine({
+  text,
+  charsShown,
+  done,
+  onAdvance,
+}: {
+  text: string;
+  charsShown: number;
+  done: boolean;
+  onAdvance: () => void;
+}) {
+  const shown = text.slice(0, charsShown);
+  return (
+    <div
+      onClick={onAdvance}
+      style={{
+        cursor: done ? "pointer" : "default",
+        minHeight: 60,
+      }}
+    >
+      <span
         style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 4,
-          padding: 2,
+          fontSize: 12,
+          lineHeight: 1.6,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          color: "var(--ink)",
         }}
       >
-        {props.voicePhase === "idle" ? (
-          <button
-            type="button"
-            onMouseDown={props.onVoicePress}
-            onMouseUp={props.onVoiceRelease}
-            onMouseLeave={(e) => {
-              if ((e.buttons & 1) !== 0) props.onVoiceRelease();
-            }}
-            onTouchStart={(e) => {
-              e.preventDefault();
-              props.onVoicePress();
-            }}
-            onTouchEnd={(e) => {
-              e.preventDefault();
-              props.onVoiceRelease();
-            }}
+        {shown}
+      </span>
+      {done ? (
+        <span
+          className="fc-blink"
+          style={{
+            marginLeft: 8,
+            color: DIALOG_BORDER,
+            fontSize: 12,
+          }}
+        >
+          ▼
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function HtmlMcOptions({
+  options,
+  onSelect,
+}: {
+  options: McOption[];
+  onSelect: (opt: McOption) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {options.slice(0, 4).map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          onClick={() => onSelect(opt)}
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border-strong)",
+            padding: "10px 12px",
+            borderRadius: 4,
+            textAlign: "left",
+            cursor: "pointer",
+            color: "var(--ink)",
+            fontSize: 11,
+            lineHeight: 1.6,
+            fontFamily: "var(--font-pixel), monospace",
+            transition: "border-color 100ms ease, background 100ms ease",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = DIALOG_BORDER;
+            e.currentTarget.style.background = "var(--surface-sunken)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "var(--border-strong)";
+            e.currentTarget.style.background = "var(--surface)";
+          }}
+        >
+          {`> ${opt.text}`}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function HtmlTextInput({
+  value,
+  onChange,
+  onSubmit,
+}: {
+  value: string;
+  onChange: (s: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div>
+      <textarea
+        autoFocus
+        value={value}
+        maxLength={TEXT_MAX_LEN}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onSubmit();
+          }
+        }}
+        placeholder="TYPE YOUR REPLY"
+        style={{
+          width: "100%",
+          minHeight: 64,
+          background: "var(--surface)",
+          color: "var(--ink)",
+          border: "1px solid var(--border-strong)",
+          outline: "none",
+          resize: "vertical",
+          fontFamily: "var(--font-pixel), monospace",
+          fontSize: 11,
+          lineHeight: 1.6,
+          padding: 10,
+          borderRadius: 4,
+          boxSizing: "border-box",
+        }}
+      />
+      <div
+        style={{
+          marginTop: 8,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 10,
+            color: "var(--ink-4)",
+            fontFamily: "var(--font-pixel), monospace",
+          }}
+        >
+          {value.length}/{TEXT_MAX_LEN}
+        </span>
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={value.length === 0}
+          className="btn btn-primary btn-sm"
+          style={{ fontFamily: "var(--font-pixel), monospace" }}
+        >
+          SEND ►
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HtmlVoiceInput({
+  phase,
+  transcript,
+  error,
+  onPress,
+  onRelease,
+  onConfirm,
+  onRetry,
+}: {
+  phase: VoicePhase;
+  transcript: string;
+  error: string | null;
+  onPress: () => void;
+  onRelease: () => void;
+  onConfirm: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 12,
+        padding: "16px 0",
+      }}
+    >
+      {phase === "idle" ? (
+        <button
+          type="button"
+          onMouseDown={onPress}
+          onMouseUp={onRelease}
+          onMouseLeave={(e) => {
+            if ((e.buttons & 1) !== 0) onRelease();
+          }}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            onPress();
+          }}
+          onTouchEnd={(e) => {
+            e.preventDefault();
+            onRelease();
+          }}
+          className="btn btn-primary btn-lg"
+          style={{ fontFamily: "var(--font-pixel), monospace" }}
+        >
+          HOLD TO SPEAK
+        </button>
+      ) : null}
+      {phase === "recording" ? (
+        <span style={{ fontSize: 12, color: "var(--score-red)" }}>
+          <span className="fc-blink">●</span> LISTENING
+          <span className="fc-dots" />
+        </span>
+      ) : null}
+      {phase === "transcribing" ? (
+        <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+          TRANSCRIBING<span className="fc-dots" />
+        </span>
+      ) : null}
+      {phase === "confirming" ? (
+        <>
+          <div
             style={{
-              background: "#306230",
-              border: "1px solid #9bbc0f",
-              padding: "4px 8px",
-              cursor: "pointer",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              padding: "10px 12px",
+              borderRadius: 4,
+              fontSize: 11,
+              color: "var(--ink-2)",
+              maxWidth: 480,
+              lineHeight: 1.6,
             }}
           >
-            <PixelText size={6}>HOLD TO SPEAK</PixelText>
-          </button>
-        ) : null}
-        {props.voicePhase === "recording" ? (
-          <PixelText size={6}>
-            <span className="fc-blink">●</span> LISTENING<span className="fc-dots" />
-          </PixelText>
-        ) : null}
-        {props.voicePhase === "transcribing" ? (
-          <PixelText size={6}>
-            TRANSCRIBING<span className="fc-dots" />
-          </PixelText>
-        ) : null}
-        {props.voicePhase === "confirming" ? (
-          <>
-            <PixelText
-              size={6}
-              style={{
-                maxHeight: 18,
-                overflow: "hidden",
-                textAlign: "center",
-                lineHeight: 1.4,
-                padding: "0 4px",
-              }}
-            >
-              &ldquo;{props.voiceTranscript.slice(0, 80)}&rdquo;
-            </PixelText>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={props.onVoiceConfirm}
-                style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer" }}
-              >
-                <PixelText size={6} color="#8bac0f">► CONFIRM</PixelText>
-              </button>
-              <button
-                type="button"
-                onClick={props.onVoiceRetry}
-                style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer" }}
-              >
-                <PixelText size={6} color="#e03030">► RETRY</PixelText>
-              </button>
-            </div>
-          </>
-        ) : null}
-        {props.voicePhase === "error" ? (
-          <>
-            <PixelText size={6} color="#e03030">
-              {props.voiceError ?? "VOICE ERROR"}
-            </PixelText>
+            &ldquo;{transcript}&rdquo;
+          </div>
+          <div style={{ display: "flex", gap: 12 }}>
             <button
               type="button"
-              onClick={props.onVoiceRetry}
-              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer" }}
+              onClick={onConfirm}
+              className="btn btn-primary btn-sm"
+              style={{ fontFamily: "var(--font-pixel), monospace" }}
             >
-              <PixelText size={6} color="#9bbc0f">► RETRY</PixelText>
+              CONFIRM
             </button>
-          </>
-        ) : null}
-      </div>
-    );
-  }
+            <button
+              type="button"
+              onClick={onRetry}
+              className="btn btn-secondary btn-sm"
+              style={{ fontFamily: "var(--font-pixel), monospace" }}
+            >
+              RETRY
+            </button>
+          </div>
+        </>
+      ) : null}
+      {phase === "error" ? (
+        <>
+          <span style={{ color: "var(--score-red)", fontSize: 11 }}>
+            {error ?? "VOICE ERROR"}
+          </span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="btn btn-secondary btn-sm"
+            style={{ fontFamily: "var(--font-pixel), monospace" }}
+          >
+            RETRY
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
 
-  if (dialog.kind === "evaluating") {
-    return (
+function HtmlCoachingDialog({ text }: { text: string }) {
+  return (
+    <div>
       <div
         style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          fontSize: 10,
+          color: DIALOG_BORDER,
+          marginBottom: 8,
+          letterSpacing: "0.12em",
         }}
       >
-        <PixelText size={6}>
-          EVALUATING<span className="fc-dots" />
-        </PixelText>
+        COACH:
       </div>
-    );
-  }
-
-  if (dialog.kind === "coaching") {
-    return (
-      <div
+      <span
         style={{
-          position: "absolute",
-          inset: 0,
-          padding: 1,
-          overflow: "hidden",
+          fontSize: 12,
+          lineHeight: 1.6,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          color: "var(--ink-2)",
         }}
       >
-        <PixelText
-          size={5}
-          color="#9bbc0f"
-          style={{ display: "block", marginBottom: 1, lineHeight: 1 }}
-        >
-          COACH:
-        </PixelText>
-        <PixelText
-          size={5}
-          color="#8bac0f"
-          style={{
-            display: "block",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            lineHeight: 1.2,
-          }}
-        >
-          {dialog.text}
-        </PixelText>
-      </div>
-    );
-  }
-
-  return null;
+        {text}
+      </span>
+    </div>
+  );
 }
 
 // ───────────────────────────────────────────────────────────────────
