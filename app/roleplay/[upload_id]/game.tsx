@@ -906,6 +906,10 @@ function ProspectSpriteArea({
 }
 
 function DialogBoxWrapper({ children }: { children: React.ReactNode }) {
+  // Tight padding budget: zone 4 is 48px tall total. Outer + inner +
+  // border + DialogContent padding all eat into vertical space, so we
+  // keep padding at 2 (down from 4) to preserve room for 4 lines of
+  // 6px text inside the bordered box.
   return (
     <div
       style={{
@@ -917,7 +921,7 @@ function DialogBoxWrapper({ children }: { children: React.ReactNode }) {
         background: "#0f380f",
         borderTop: "1px solid #9bbc0f",
         boxSizing: "border-box",
-        padding: 4,
+        padding: 2,
       }}
     >
       <div
@@ -925,10 +929,11 @@ function DialogBoxWrapper({ children }: { children: React.ReactNode }) {
           width: "100%",
           height: "100%",
           border: "1px solid #9bbc0f",
-          padding: 4,
+          padding: 2,
           boxSizing: "border-box",
           position: "relative",
           background: "#0f380f",
+          overflow: "hidden",
         }}
       >
         {children}
@@ -993,8 +998,13 @@ function BattleView(props: {
   onVoiceRetry: () => void;
 }) {
   const palette = pickPalette(props.archetype, props.wallDropped, false);
-  const truncatedName = props.prospectName.toUpperCase().slice(0, 14);
-  const repTruncated = props.repName.toUpperCase().slice(0, 10);
+  const truncatedName = props.prospectName.toUpperCase().slice(0, 12);
+  // First name only — the YOU header has to share 160px with the CON
+  // bar (~75px), so anything past ~8 chars wraps to a second line.
+  const repFirst = props.repName
+    .split(/\s+/)[0]
+    .toUpperCase()
+    .slice(0, 8);
   const speakingFrame = useSpeakingFrame(
     props.dialog.kind === "prospect_speaking" && !props.dialog.done,
   );
@@ -1016,9 +1026,24 @@ function BattleView(props: {
           boxSizing: "border-box",
         }}
       >
-        <PixelText size={6}>{truncatedName}</PixelText>
+        <PixelText
+          size={6}
+          style={{
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "clip",
+            minWidth: 0,
+          }}
+        >
+          {truncatedName}
+        </PixelText>
         <div
-          style={{ display: "flex", gap: 4, alignItems: "center" }}
+          style={{
+            display: "flex",
+            gap: 4,
+            alignItems: "center",
+            flexShrink: 0,
+          }}
         >
           <PixelText size={6}>RES</PixelText>
           <ResistanceBar value={props.resistance} flash={props.resistanceFlash} />
@@ -1058,8 +1083,25 @@ function BattleView(props: {
           borderBottom: "1px solid #306230",
         }}
       >
-        <PixelText size={6}>YOU · {repTruncated}</PixelText>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        <PixelText
+          size={6}
+          style={{
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "clip",
+            minWidth: 0,
+          }}
+        >
+          YOU {repFirst}
+        </PixelText>
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            alignItems: "center",
+            flexShrink: 0,
+          }}
+        >
           <PixelText size={6}>CON</PixelText>
           <ResistanceBar value={props.confidence} flash={false} />
         </div>
@@ -1129,11 +1171,23 @@ function DialogContent(props: {
         style={{
           position: "absolute",
           inset: 0,
-          padding: 4,
+          padding: 2,
           cursor: dialog.done ? "pointer" : "default",
+          overflow: "hidden",
+          // Reserve the bottom-right corner for the blink arrow so the
+          // last line of text doesn't overlap it.
+          paddingRight: 8,
         }}
       >
-        <PixelText size={6} style={{ whiteSpace: "pre-wrap", lineHeight: 1.4 }}>
+        <PixelText
+          size={6}
+          style={{
+            display: "block",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            lineHeight: 1.1,
+          }}
+        >
           {shown}
         </PixelText>
         {dialog.done ? <BlinkArrow position="br" /> : null}
@@ -1365,13 +1419,23 @@ function DialogContent(props: {
         style={{
           position: "absolute",
           inset: 0,
-          padding: 4,
+          padding: 2,
+          overflow: "hidden",
         }}
       >
-        <PixelText size={6} color="#9bbc0f" style={{ display: "block", marginBottom: 2 }}>
+        <PixelText size={6} color="#9bbc0f" style={{ display: "block", marginBottom: 1 }}>
           COACH:
         </PixelText>
-        <PixelText size={6} color="#8bac0f" style={{ whiteSpace: "pre-wrap", lineHeight: 1.4 }}>
+        <PixelText
+          size={6}
+          color="#8bac0f"
+          style={{
+            display: "block",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            lineHeight: 1.1,
+          }}
+        >
           {dialog.text}
         </PixelText>
       </div>
