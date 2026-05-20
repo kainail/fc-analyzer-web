@@ -906,10 +906,12 @@ function ProspectSpriteArea({
 }
 
 function DialogBoxWrapper({ children }: { children: React.ReactNode }) {
-  // Tight padding budget: zone 4 is 48px tall total. Outer + inner +
-  // border + DialogContent padding all eat into vertical space, so we
-  // keep padding at 2 (down from 4) to preserve room for 4 lines of
-  // 6px text inside the bordered box.
+  // Zone 4 is 48px tall total. We strip every padding down to 1 and
+  // enforce overflow: hidden at both wrapper levels so text + MC rows
+  // can never escape the box. Press Start 2P at 6px renders taller
+  // than its declared size (font metric leading); dropping the dialog
+  // body to 5px is what actually keeps 4-line prospect dialog and
+  // 4-row MC option lists inside the bordered region.
   return (
     <div
       style={{
@@ -921,7 +923,8 @@ function DialogBoxWrapper({ children }: { children: React.ReactNode }) {
         background: "#0f380f",
         borderTop: "1px solid #9bbc0f",
         boxSizing: "border-box",
-        padding: 2,
+        padding: 1,
+        overflow: "hidden",
       }}
     >
       <div
@@ -929,7 +932,7 @@ function DialogBoxWrapper({ children }: { children: React.ReactNode }) {
           width: "100%",
           height: "100%",
           border: "1px solid #9bbc0f",
-          padding: 2,
+          padding: 1,
           boxSizing: "border-box",
           position: "relative",
           background: "#0f380f",
@@ -1171,21 +1174,19 @@ function DialogContent(props: {
         style={{
           position: "absolute",
           inset: 0,
-          padding: 2,
+          padding: 1,
+          paddingRight: 7,
           cursor: dialog.done ? "pointer" : "default",
           overflow: "hidden",
-          // Reserve the bottom-right corner for the blink arrow so the
-          // last line of text doesn't overlap it.
-          paddingRight: 8,
         }}
       >
         <PixelText
-          size={6}
+          size={5}
           style={{
             display: "block",
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
-            lineHeight: 1.1,
+            lineHeight: 1.2,
           }}
         >
           {shown}
@@ -1196,15 +1197,18 @@ function DialogContent(props: {
   }
 
   if (dialog.kind === "rep_input_mc") {
+    // 4 rows must fit inside ~42px (zone 4 minus borders/padding).
+    // Fixed-height rows + no gap + size 5 PixelText keep the count
+    // deterministic regardless of the font's intrinsic leading.
     return (
       <div
         style={{
-          padding: 2,
-          display: "flex",
-          flexDirection: "column",
-          gap: 2,
           position: "absolute",
           inset: 0,
+          padding: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
         }}
       >
         {dialog.options.slice(0, 4).map((opt) => (
@@ -1216,13 +1220,30 @@ function DialogContent(props: {
             style={{
               background: "transparent",
               border: "none",
-              padding: "1px 2px",
+              padding: 0,
+              margin: 0,
               textAlign: "left",
               cursor: "pointer",
+              height: 10,
+              lineHeight: 1,
+              display: "flex",
+              alignItems: "center",
+              width: "100%",
+              overflow: "hidden",
             }}
           >
-            <PixelText size={6}>
-              ► {opt.text.slice(0, 36)}
+            <PixelText
+              size={5}
+              style={{
+                display: "block",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "clip",
+                lineHeight: 1,
+                width: "100%",
+              }}
+            >
+              {`► ${opt.text}`.slice(0, 30)}
             </PixelText>
           </button>
         ))}
@@ -1419,21 +1440,25 @@ function DialogContent(props: {
         style={{
           position: "absolute",
           inset: 0,
-          padding: 2,
+          padding: 1,
           overflow: "hidden",
         }}
       >
-        <PixelText size={6} color="#9bbc0f" style={{ display: "block", marginBottom: 1 }}>
+        <PixelText
+          size={5}
+          color="#9bbc0f"
+          style={{ display: "block", marginBottom: 1, lineHeight: 1 }}
+        >
           COACH:
         </PixelText>
         <PixelText
-          size={6}
+          size={5}
           color="#8bac0f"
           style={{
             display: "block",
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
-            lineHeight: 1.1,
+            lineHeight: 1.2,
           }}
         >
           {dialog.text}
