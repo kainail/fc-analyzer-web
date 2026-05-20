@@ -213,7 +213,7 @@ const SPRITE_SKEPTIC: SpriteGrid = [
   "...1233333321...",
   "...1223333221...",
   "....12211221....",
-  "...11111111....",
+  "....11111111....",
   "..122122122122..",
   "..122122122122..",
   "..122122122122..",
@@ -411,6 +411,7 @@ function PixelSprite({
   for (let y = 0; y < rows; y++) {
     const row = grid[y];
     for (let x = 0; x < cols; x++) {
+      if (!row || x >= row.length) continue;
       const ch = row[x];
       if (ch === "." || ch === " ") continue;
       const idx = ch.charCodeAt(0) - "1".charCodeAt(0);
