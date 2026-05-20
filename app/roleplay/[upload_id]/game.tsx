@@ -1197,15 +1197,18 @@ function DialogContent(props: {
   }
 
   if (dialog.kind === "rep_input_mc") {
-    // 4 rows must fit inside ~42px (zone 4 minus borders/padding).
-    // Fixed-height rows + no gap + size 5 PixelText keep the count
-    // deterministic regardless of the font's intrinsic leading.
+    // Each row holds up to 2 wrapped lines of 5px text (lineHeight 1
+    // = 10px box). 4 rows × 10px = 40px and the dialog content area
+    // is ~41px after padding + borders, so this is the snuggest fit
+    // that doesn't overflow. We drop the outer wrapper padding to 0
+    // to give every available pixel to the rows. Any 3rd wrapped line
+    // gets clipped by the row's overflow: hidden.
     return (
       <div
         style={{
           position: "absolute",
           inset: 0,
-          padding: 1,
+          padding: 0,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -1225,10 +1228,12 @@ function DialogContent(props: {
               textAlign: "left",
               cursor: "pointer",
               height: 10,
+              minHeight: 10,
+              maxHeight: 10,
               lineHeight: 1,
-              display: "flex",
-              alignItems: "center",
+              display: "block",
               width: "100%",
+              maxWidth: "100%",
               overflow: "hidden",
             }}
           >
@@ -1236,14 +1241,15 @@ function DialogContent(props: {
               size={5}
               style={{
                 display: "block",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "clip",
+                whiteSpace: "normal",
+                wordBreak: "break-word",
                 lineHeight: 1,
                 width: "100%",
+                maxWidth: "100%",
+                minWidth: 0,
               }}
             >
-              {`► ${opt.text}`.slice(0, 30)}
+              {`> ${opt.text}`}
             </PixelText>
           </button>
         ))}
