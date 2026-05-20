@@ -3,31 +3,44 @@ import path from "node:path";
 
 const SUBDIRS = ["methodology", "rubric", "schema"] as const;
 
-export function loadSkill(): string {
-  // SKILL_PATH wins in local dev (where the skill is iterated outside
-  // the repo). In production / Railway, the env var is unset and we
-  // fall through to the bundled skill/ directory checked into the
-  // repo root. The bundled copy is the source of truth for deploys.
-  const root = process.env.SKILL_PATH ?? path.join(process.cwd(), "skill");
-  if (!fs.existsSync(root)) {
-    throw new Error(
-      `Skill directory does not exist: ${root}. Set SKILL_PATH or ensure the bundled skill/ folder is present at the repo root.`,
-    );
-  }
+// SKILL_PATH points at a skill ROOT in local dev — the dir containing
+// SKILL.md plus methodology/ / rubric/ / schema/ directly. The roleplay
+// skill files live alongside as a `roleplay/` sibling under the same
+// root. In production / Railway the env var is unset and we fall back
+// to the bundled skill/ directory at the repo cwd.
+//
+// resolveSkillPath is a per-file resolver: it tries SKILL_PATH first
+// and falls back to the bundled copy when a given file/dir is missing
+// from the override. That keeps the analyzer skill iterable outside
+// the repo without forcing the dev's external skill dir to also carry
+// roleplay assets — those can stay in the bundle.
+function bundleRoot(): string {
+  return path.join(process.cwd(), "skill");
+}
 
+export function resolveSkillPath(relativePath: string): string {
+  const override = process.env.SKILL_PATH;
+  if (override) {
+    const fromOverride = path.join(override, relativePath);
+    if (fs.existsSync(fromOverride)) return fromOverride;
+  }
+  const fromBundle = path.join(bundleRoot(), relativePath);
+  if (fs.existsSync(fromBundle)) return fromBundle;
+  throw new Error(
+    `Skill file not found: ${relativePath} (looked in ${
+      override ? `${path.join(override, relativePath)} and ` : ""
+    }${fromBundle})`,
+  );
+}
+
+export function loadSkill(): string {
   const sections: string[] = [];
 
-  const skillMd = path.join(root, "SKILL.md");
-  if (!fs.existsSync(skillMd)) {
-    throw new Error(`Required file missing: ${skillMd}`);
-  }
+  const skillMd = resolveSkillPath("SKILL.md");
   sections.push(`# SKILL.md\n\n${fs.readFileSync(skillMd, "utf8")}`);
 
   for (const dir of SUBDIRS) {
-    const dirPath = path.join(root, dir);
-    if (!fs.existsSync(dirPath)) {
-      throw new Error(`Required subdirectory missing: ${dirPath}`);
-    }
+    const dirPath = resolveSkillPath(dir);
     const files = fs
       .readdirSync(dirPath)
       .filter((f) => f.endsWith(".md") || f.endsWith(".json"))

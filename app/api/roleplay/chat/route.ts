@@ -19,12 +19,12 @@
  * leak session existence.
  */
 import fs from "node:fs";
-import path from "node:path";
 import { auth } from "@clerk/nextjs/server";
 import { APIError } from "@anthropic-ai/sdk";
 import { anthropic } from "@/lib/anthropic";
 import { prisma } from "@/lib/db";
 import { downloadFromR2, uploadToR2 } from "@/lib/r2";
+import { resolveSkillPath } from "@/lib/skill-loader";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,32 +69,20 @@ type RequestBody = {
 type RequestType = "session_open" | "turn" | "final_report";
 
 function loadRoleplaySkill(): string {
-  // SKILL_PATH points to the skill/ root in local dev (so iteration
-  // outside the repo works); in production it's unset and we fall
-  // back to the bundled skill/ folder at the repo root.
-  const skillRoot = process.env.SKILL_PATH ?? path.join(process.cwd(), "skill");
-  const roleplayRoot = path.join(skillRoot, "roleplay");
-
-  if (!fs.existsSync(roleplayRoot)) {
-    throw new Error(
-      `Roleplay skill directory missing: ${roleplayRoot}. Set SKILL_PATH or ensure skill/roleplay/ is bundled.`,
-    );
-  }
-
+  // Both files use the same SKILL_PATH-as-skill-root convention as
+  // lib/skill-loader: per-file lookup that tries SKILL_PATH first and
+  // falls back to the bundled skill/ copy. This lets the analyzer
+  // skill be iterated outside the repo (SKILL_PATH points there) while
+  // roleplay assets stay in the bundle without forcing the override
+  // dir to carry both.
   const sections: string[] = [];
 
   for (const rel of ROLEPLAY_SKILL_FILES) {
-    const full = path.join(roleplayRoot, rel);
-    if (!fs.existsSync(full)) {
-      throw new Error(`Required roleplay skill file missing: ${full}`);
-    }
+    const full = resolveSkillPath(`roleplay/${rel}`);
     sections.push(`# roleplay/${rel}\n\n${fs.readFileSync(full, "utf8")}`);
   }
 
-  const stagesPath = path.join(skillRoot, "rubric", "stages.md");
-  if (!fs.existsSync(stagesPath)) {
-    throw new Error(`Required rubric file missing: ${stagesPath}`);
-  }
+  const stagesPath = resolveSkillPath("rubric/stages.md");
   sections.push(`# rubric/stages.md\n\n${fs.readFileSync(stagesPath, "utf8")}`);
 
   return sections.join("\n\n---\n\n");
