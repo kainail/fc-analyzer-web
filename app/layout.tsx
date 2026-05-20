@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Sans, JetBrains_Mono } from "next/font/google";
+import { DM_Sans, JetBrains_Mono, Press_Start_2P } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import "./globals.css";
@@ -27,6 +27,16 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-mono",
+  display: "swap",
+});
+
+// Pixel/bitmap font for the FC Roleplay battle screen. Only used by
+// the /roleplay/[upload_id] route — exposed as --font-pixel so the
+// game component can opt in via that CSS variable.
+const pressStart2P = Press_Start_2P({
+  subsets: ["latin"],
+  weight: ["400"],
+  variable: "--font-pixel",
   display: "swap",
 });
 
@@ -133,7 +143,7 @@ export default async function RootLayout({
       <html
         lang="en"
         data-theme="dark"
-        className={`${dmSans.variable} ${jetbrainsMono.variable}`}
+        className={`${dmSans.variable} ${jetbrainsMono.variable} ${pressStart2P.variable}`}
       >
         <body>
           <div className="app">

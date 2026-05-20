@@ -660,7 +660,13 @@ function FocusCard({
   );
 }
 
-function RoleplaySeedBody({ seed }: { seed: RoleplayScenarioSeed }) {
+function RoleplaySeedBody({
+  seed,
+  uploadId,
+}: {
+  seed: RoleplayScenarioSeed;
+  uploadId: string;
+}) {
   const p = seed.prospect_profile;
   const rows: Array<[string, string]> = [
     ["Demographic", p.demographic],
@@ -762,9 +768,12 @@ function RoleplaySeedBody({ seed }: { seed: RoleplayScenarioSeed }) {
           borderTop: "1px solid var(--divider)",
         }}
       >
-        <button type="button" className="btn btn-primary btn-sm" disabled>
+        <Link
+          href={`/roleplay/${encodeURIComponent(uploadId)}`}
+          className="btn btn-primary btn-sm"
+        >
           <Play size={12} /> Start roleplay
-        </button>
+        </Link>
         <button type="button" className="btn btn-secondary btn-sm" disabled>
           <Doc size={13} /> Print drill card
         </button>
@@ -1441,7 +1450,10 @@ export default function AnalysisView({
         }
       >
         {json.roleplay_scenario_seed ? (
-          <RoleplaySeedBody seed={json.roleplay_scenario_seed} />
+          <RoleplaySeedBody
+            seed={json.roleplay_scenario_seed}
+            uploadId={metadata.upload_id}
+          />
         ) : (
           <div
             style={{
