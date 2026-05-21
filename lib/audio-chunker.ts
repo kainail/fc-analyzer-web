@@ -12,8 +12,9 @@
  *
  * Binary resolution order (first one that responds to `-version` wins):
  *   1. FFMPEG_PATH env var (set in .env.local)
- *   2. "ffmpeg" on PATH
- *   3. Hardcoded Windows fallback at the WinGet Gyan.FFmpeg install
+ *   2. ffmpeg-static — the npm-bundled binary, no system install needed
+ *   3. "ffmpeg" on PATH
+ *   4. Hardcoded Windows fallback at the WinGet Gyan.FFmpeg install
  *      location on the dev machine — keeps things working when PATH
  *      isn't configured.
  *
@@ -25,6 +26,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import ffmpegStatic from "ffmpeg-static";
 
 export const CHUNK_DURATION_SECONDS = 600;
 
@@ -101,6 +103,13 @@ export async function resolveFfmpegBinary(): Promise<string | null> {
   const candidates: string[] = [];
   if (process.env.FFMPEG_PATH?.trim()) {
     candidates.push(process.env.FFMPEG_PATH.trim());
+  }
+  // ffmpeg-static returns the path to its bundled binary, or null on
+  // unsupported platforms. Trying it before the PATH lookup means
+  // production (Railway, Vercel, anywhere) doesn't need a system
+  // ffmpeg install — just the npm dep.
+  if (ffmpegStatic && !candidates.includes(ffmpegStatic)) {
+    candidates.push(ffmpegStatic);
   }
   candidates.push("ffmpeg");
   if (
