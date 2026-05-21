@@ -498,7 +498,7 @@ function DimensionCard({ entry }: { entry: CrossCuttingScore }) {
           {label}
         </span>
         <span className={`score-pill ${bandClass(band)}`}>
-          {entry.score.toFixed(1)}
+          {entry.score != null ? entry.score.toFixed(1) : "—"}
         </span>
       </div>
       <ScoreBar value={entry.score} />
