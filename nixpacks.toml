@@ -1,2 +1,5 @@
 [phases.setup]
 nixPkgs = ["ffmpeg"]
+
+[variables]
+NIXPACKS_CACHE_KEY = "v2"
