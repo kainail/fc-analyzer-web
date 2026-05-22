@@ -927,6 +927,7 @@ function BattleView(props: {
   voicePhase: VoicePhase;
   voiceTranscript: string;
   voiceError: string | null;
+  lastProspectLine: string;
   onAdvanceProspect: () => void;
   onAdvanceCoaching: () => void;
   onSelectMc: (opt: McOption) => void;
@@ -1129,6 +1130,7 @@ function BattleView(props: {
 
       <HtmlDialogBox
         prospectName={props.prospectName}
+        lastProspectLine={props.lastProspectLine}
         dialog={props.dialog}
         textInputValue={props.textInputValue}
         voicePhase={props.voicePhase}
@@ -1175,6 +1177,7 @@ const DIALOG_BORDER = "#8bac0f";
 
 function HtmlDialogBox(props: {
   prospectName: string;
+  lastProspectLine: string;
   dialog: DialogMode;
   textInputValue: string;
   voicePhase: VoicePhase;
@@ -1236,6 +1239,8 @@ function HtmlDialogBox(props: {
           value={props.textInputValue}
           onChange={props.onChangeText}
           onSubmit={props.onSubmitText}
+          prospectName={props.prospectName}
+          prospectLine={props.lastProspectLine}
         />
       ) : null}
       {dialog.kind === "rep_input_voice" ? (
@@ -1366,13 +1371,51 @@ function HtmlTextInput({
   value,
   onChange,
   onSubmit,
+  prospectName,
+  prospectLine,
 }: {
   value: string;
   onChange: (s: string) => void;
   onSubmit: () => void;
+  prospectName: string;
+  prospectLine: string;
 }) {
   return (
     <div>
+      {prospectLine ? (
+        <div
+          style={{
+            marginBottom: 12,
+            paddingBottom: 12,
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              letterSpacing: "0.12em",
+              color: "var(--ink-4)",
+              marginBottom: 6,
+              textTransform: "uppercase",
+              fontFamily: "var(--font-pixel), monospace",
+            }}
+          >
+            {prospectName} said
+          </div>
+          <span
+            style={{
+              fontSize: 12,
+              lineHeight: 1.6,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              color: "var(--ink-3)",
+              fontFamily: "var(--font-pixel), monospace",
+            }}
+          >
+            {prospectLine}
+          </span>
+        </div>
+      ) : null}
       <textarea
         autoFocus
         value={value}
@@ -2739,6 +2782,16 @@ export default function Game({
     return computeXpFallback(outcome, mode, moveTallies);
   }, [outcome, mode, moveTallies]);
 
+  // Most recent prospect utterance — used by text mode (Phase C) to
+  // keep the prospect's line visible above the textarea while the rep
+  // is composing a reply.
+  const lastProspectLine = useMemo(() => {
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].role === "prospect") return history[i].content;
+    }
+    return "";
+  }, [history]);
+
   return (
     <>
       <PixelGlobalStyles />
@@ -2788,6 +2841,7 @@ export default function Game({
           voicePhase={voicePhase}
           voiceTranscript={voiceTranscript}
           voiceError={voiceError}
+          lastProspectLine={lastProspectLine}
           onAdvanceProspect={advanceProspect}
           onAdvanceCoaching={handleAdvanceCoaching}
           onSelectMc={onSelectMc}
