@@ -2591,7 +2591,14 @@ export default function Game({
         // we don't await so the text starts streaming immediately. The
         // function early-returns if muted or no voice id is configured.
         const arch = session?.archetype;
-        if (arch) void playProspectTts(data.prospect_line, arch);
+        if (arch) {
+          console.log("Phase A triggered, calling TTS");
+          void playProspectTts(data.prospect_line, arch);
+        } else {
+          console.warn(
+            "Phase A triggered but session has no archetype — TTS skipped",
+          );
+        }
         startTypewriter(data.prospect_line, "prospect_speaking", () => {
           // typewriter done — wait for user advance
         });
