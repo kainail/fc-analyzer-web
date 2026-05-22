@@ -171,7 +171,6 @@ const GHOST_OPEN_PALETTE = ["#0f1a2e", "#1a3a5c", "#4a7ab0", "#b0d4f5"] as const
 const DEFEAT_PALETTE = ["#080c08", "#1a2a18", "#456007", "#5a7008"] as const;
 
 const TYPEWRITER_MS = 40;
-const COACHING_MS = 4000;
 const LABEL_FLOAT_MS = 800;
 const RES_BAR_TRANSITION_MS = 400;
 const TEXT_MAX_LEN = 280;
@@ -929,6 +928,7 @@ function BattleView(props: {
   voiceTranscript: string;
   voiceError: string | null;
   onAdvanceProspect: () => void;
+  onAdvanceCoaching: () => void;
   onSelectMc: (opt: McOption) => void;
   onChangeText: (s: string) => void;
   onSubmitText: () => void;
@@ -1135,6 +1135,7 @@ function BattleView(props: {
         voiceTranscript={props.voiceTranscript}
         voiceError={props.voiceError}
         onAdvanceProspect={props.onAdvanceProspect}
+        onAdvanceCoaching={props.onAdvanceCoaching}
         onSelectMc={props.onSelectMc}
         onChangeText={props.onChangeText}
         onSubmitText={props.onSubmitText}
@@ -1180,6 +1181,7 @@ function HtmlDialogBox(props: {
   voiceTranscript: string;
   voiceError: string | null;
   onAdvanceProspect: () => void;
+  onAdvanceCoaching: () => void;
   onSelectMc: (opt: McOption) => void;
   onChangeText: (s: string) => void;
   onSubmitText: () => void;
@@ -1261,7 +1263,10 @@ function HtmlDialogBox(props: {
         </div>
       ) : null}
       {dialog.kind === "coaching" ? (
-        <HtmlCoachingDialog text={dialog.text} />
+        <HtmlCoachingDialog
+          text={dialog.text}
+          onAdvance={props.onAdvanceCoaching}
+        />
       ) : null}
     </div>
   );
@@ -1542,9 +1547,15 @@ function HtmlVoiceInput({
   );
 }
 
-function HtmlCoachingDialog({ text }: { text: string }) {
+function HtmlCoachingDialog({
+  text,
+  onAdvance,
+}: {
+  text: string;
+  onAdvance: () => void;
+}) {
   return (
-    <div>
+    <div onClick={onAdvance} style={{ cursor: "pointer" }}>
       <div
         style={{
           fontSize: 10,
@@ -1566,6 +1577,16 @@ function HtmlCoachingDialog({ text }: { text: string }) {
       >
         {text}
       </span>
+      <div
+        style={{
+          marginTop: 10,
+          fontSize: 11,
+          color: DIALOG_BORDER,
+          letterSpacing: "0.08em",
+        }}
+      >
+        <span className="fc-blink">▼</span> CONTINUE
+      </div>
     </div>
   );
 }
@@ -2141,6 +2162,11 @@ export default function Game({
   const recorderChunksRef = useRef<Blob[]>([]);
   const recorderStreamRef = useRef<MediaStream | null>(null);
 
+  // Phase E ("coaching") used to auto-advance after 4 seconds. It now
+  // waits for the user to click — we stash the original advance action
+  // here when entering coaching, and the click handler pulls it out.
+  const coachingAdvanceRef = useRef<(() => void) | null>(null);
+
   // Final outcome bookkeeping
   const [outcome, setOutcome] = useState<
     "win" | "loss_walkout" | "loss_timeout" | "draw" | null
@@ -2289,14 +2315,17 @@ export default function Game({
 
       if (!isOpen && data.turn_feedback) {
         setGameState("battle");
-        setDialog({ kind: "coaching", text: data.turn_feedback });
-        setTimeout(() => {
+        // Stash whatever the timer used to do — handleAdvanceCoaching
+        // (wired to the dialog's click handler) pulls it back out when
+        // the rep taps to continue.
+        coachingAdvanceRef.current = () => {
           if (outcomeNow) {
             finalizeOutcome(outcomeNow, data);
           } else {
             runProspectTypewriter();
           }
-        }, COACHING_MS);
+        };
+        setDialog({ kind: "coaching", text: data.turn_feedback });
       } else if (outcomeNow) {
         finalizeOutcome(outcomeNow, data);
       } else {
@@ -2573,6 +2602,14 @@ export default function Game({
     setVoicePhase("idle");
   }, []);
 
+  // Phase E click handler — runs whatever applyProspectTurn stashed
+  // (next prospect line or outcome finalization) and clears the ref.
+  const handleAdvanceCoaching = useCallback(() => {
+    const fn = coachingAdvanceRef.current;
+    coachingAdvanceRef.current = null;
+    fn?.();
+  }, []);
+
   // ── Request final report on victory/defeat continue ──
   const requestReport = useCallback(async () => {
     if (!session || report || reportLoading) return;
@@ -2752,6 +2789,7 @@ export default function Game({
           voiceTranscript={voiceTranscript}
           voiceError={voiceError}
           onAdvanceProspect={advanceProspect}
+          onAdvanceCoaching={handleAdvanceCoaching}
           onSelectMc={onSelectMc}
           onChangeText={setTextInputValue}
           onSubmitText={onSubmitText}
