@@ -175,40 +175,10 @@ const LABEL_FLOAT_MS = 800;
 const RES_BAR_TRANSITION_MS = 400;
 const TEXT_MAX_LEN = 280;
 
-// ───────────────────────────────────────────────────────────────────
-// Web Speech API minimal typings + helper. The Web Speech API isn't
-// in the standard DOM lib yet, so we declare just the fields we use.
-// Falls back to null on unsupported browsers (Firefox, Safari < 14.1).
-// ───────────────────────────────────────────────────────────────────
-
-type SRResult = { isFinal: boolean; 0: { transcript: string } };
-type SREvent = {
-  resultIndex: number;
-  results: ArrayLike<SRResult>;
-};
-type SRErrorEvent = { error: string; message?: string };
-type SpeechRecognitionLike = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-  onresult: ((e: SREvent) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((e: SRErrorEvent) => void) | null;
-  onstart: (() => void) | null;
-};
-type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
-
-function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: SpeechRecognitionCtor;
-    webkitSpeechRecognition?: SpeechRecognitionCtor;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
+// Max seconds we'll record before auto-stopping the MediaRecorder.
+// Whisper-1 charges per second; the analyzer-side route also enforces
+// a 25 MB cap so a runaway recording can't escape this limit anyway.
+const VOICE_MAX_RECORD_MS = 60_000;
 
 // localStorage key for the mute toggle, so the rep's preference
 // survives page refreshes.
@@ -985,7 +955,7 @@ function BattleView(props: {
   textInputValue: string;
   voicePhase: VoicePhase;
   voiceTranscript: string;
-  voiceSupported: boolean;
+  voiceError: string | null;
   lastProspectLine: string;
   isMuted: boolean;
   onToggleMute: () => void;
@@ -1225,7 +1195,7 @@ function BattleView(props: {
         textInputValue={props.textInputValue}
         voicePhase={props.voicePhase}
         voiceTranscript={props.voiceTranscript}
-        voiceSupported={props.voiceSupported}
+        voiceError={props.voiceError}
         onAdvanceProspect={props.onAdvanceProspect}
         onAdvanceCoaching={props.onAdvanceCoaching}
         onSelectMc={props.onSelectMc}
@@ -1240,7 +1210,12 @@ function BattleView(props: {
   );
 }
 
-type VoicePhase = "idle" | "listening" | "confirming";
+type VoicePhase =
+  | "idle"
+  | "recording"
+  | "transcribing"
+  | "confirming"
+  | "error";
 
 function useSpeakingFrame(active: boolean): number {
   const [frame, setFrame] = useState(0);
@@ -1267,7 +1242,7 @@ function HtmlDialogBox(props: {
   textInputValue: string;
   voicePhase: VoicePhase;
   voiceTranscript: string;
-  voiceSupported: boolean;
+  voiceError: string | null;
   onAdvanceProspect: () => void;
   onAdvanceCoaching: () => void;
   onSelectMc: (opt: McOption) => void;
@@ -1329,41 +1304,15 @@ function HtmlDialogBox(props: {
         />
       ) : null}
       {dialog.kind === "rep_input_voice" ? (
-        props.voiceSupported ? (
-          <HtmlVoiceInput
-            phase={props.voicePhase}
-            transcript={props.voiceTranscript}
-            onStart={props.onVoiceStart}
-            onStop={props.onVoiceStop}
-            onSend={props.onVoiceSend}
-            onRerecord={props.onVoiceRerecord}
-          />
-        ) : (
-          <div>
-            <div
-              style={{
-                marginBottom: 12,
-                padding: "10px 12px",
-                background: "var(--score-amber-bg)",
-                color: "var(--score-amber)",
-                border: "1px solid var(--score-amber)",
-                borderRadius: 4,
-                fontSize: 11,
-                lineHeight: 1.6,
-                fontFamily: "var(--font-pixel), monospace",
-              }}
-            >
-              Voice mode requires Chrome or Edge — falling back to text.
-            </div>
-            <HtmlTextInput
-              value={props.textInputValue}
-              onChange={props.onChangeText}
-              onSubmit={props.onSubmitText}
-              prospectName={props.prospectName}
-              prospectLine={props.lastProspectLine}
-            />
-          </div>
-        )
+        <HtmlVoiceInput
+          phase={props.voicePhase}
+          transcript={props.voiceTranscript}
+          error={props.voiceError}
+          onStart={props.onVoiceStart}
+          onStop={props.onVoiceStop}
+          onSend={props.onVoiceSend}
+          onRerecord={props.onVoiceRerecord}
+        />
       ) : null}
       {dialog.kind === "evaluating" ? (
         <div
@@ -1589,6 +1538,7 @@ function HtmlTextInput({
 function HtmlVoiceInput({
   phase,
   transcript,
+  error,
   onStart,
   onStop,
   onSend,
@@ -1596,6 +1546,7 @@ function HtmlVoiceInput({
 }: {
   phase: VoicePhase;
   transcript: string;
+  error: string | null;
   onStart: () => void;
   onStop: () => void;
   onSend: () => void;
@@ -1607,7 +1558,7 @@ function HtmlVoiceInput({
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 12,
+        gap: 14,
         padding: "16px 0",
       }}
     >
@@ -1628,35 +1579,57 @@ function HtmlVoiceInput({
         </button>
       ) : null}
 
-      {phase === "listening" ? (
+      {phase === "recording" ? (
         <>
           <div
             style={{
-              minHeight: 40,
-              maxWidth: 480,
-              width: "100%",
-              padding: "8px 12px",
-              fontSize: 12,
-              lineHeight: 1.6,
-              color: "var(--ink-2)",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
               fontFamily: "var(--font-pixel), monospace",
-              textAlign: "center",
-              wordBreak: "break-word",
+              fontSize: 12,
+              color: "var(--score-red)",
             }}
           >
-            {transcript || (
-              <span style={{ color: "var(--ink-4)" }}>
-                listening<span className="fc-dots" />
-              </span>
-            )}
+            <span
+              className="fc-pulse"
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 999,
+                background: "var(--score-red)",
+                display: "inline-block",
+              }}
+            />
+            RECORDING
           </div>
+
+          <div
+            aria-hidden
+            style={{
+              display: "flex",
+              alignItems: "flex-end",
+              gap: 4,
+              height: 32,
+            }}
+          >
+            {[0, 1, 2, 3, 4].map((i) => (
+              <span
+                key={i}
+                className="fc-wave-bar"
+                style={{
+                  width: 5,
+                  background: "#8bac0f",
+                  borderRadius: 2,
+                  animationDelay: `${i * 90}ms`,
+                }}
+              />
+            ))}
+          </div>
+
           <button
             type="button"
             onClick={onStop}
-            className="fc-pulse"
             style={{
               fontFamily: "var(--font-pixel), monospace",
               background: "#8bac0f",
@@ -1668,9 +1641,21 @@ function HtmlVoiceInput({
               cursor: "pointer",
             }}
           >
-            ● LISTENING — TAP TO STOP
+            TAP TO STOP
           </button>
         </>
+      ) : null}
+
+      {phase === "transcribing" ? (
+        <span
+          style={{
+            fontSize: 12,
+            color: "var(--ink-2)",
+            fontFamily: "var(--font-pixel), monospace",
+          }}
+        >
+          TRANSCRIBING<span className="fc-dots" />
+        </span>
       ) : null}
 
       {phase === "confirming" ? (
@@ -1710,6 +1695,31 @@ function HtmlVoiceInput({
               RE-RECORD
             </button>
           </div>
+        </>
+      ) : null}
+
+      {phase === "error" ? (
+        <>
+          <span
+            style={{
+              color: "var(--score-red)",
+              fontSize: 11,
+              fontFamily: "var(--font-pixel), monospace",
+              maxWidth: 480,
+              textAlign: "center",
+              lineHeight: 1.5,
+            }}
+          >
+            {error ?? "VOICE ERROR"}
+          </span>
+          <button
+            type="button"
+            onClick={onRerecord}
+            className="btn btn-secondary btn-sm"
+            style={{ fontFamily: "var(--font-pixel), monospace" }}
+          >
+            TRY AGAIN
+          </button>
         </>
       ) : null}
     </div>
@@ -2326,21 +2336,14 @@ export default function Game({
   // Voice mode
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const [voiceTranscript, setVoiceTranscript] = useState("");
-  // SpeechRecognition is not in standard lib.dom yet and not supported
-  // by Firefox / older Safari. We detect on mount; rendering branches
-  // on this so unsupported browsers fall back to the text input.
-  const [voiceSupported, setVoiceSupported] = useState(true);
-  useEffect(() => {
-    const supported = getSpeechRecognitionCtor() !== null;
-    console.log(`[voice] SpeechRecognition supported: ${supported}`);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setVoiceSupported(supported);
-  }, []);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  // Most-recent transcript snapshot — kept in a ref so the onend
-  // handler can read the final string without depending on stale React
-  // state at the moment the user releases the button.
-  const voiceTranscriptRef = useRef("");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  // MediaRecorder + Whisper round-trip. We track the recorder, its
+  // captured chunks, the live mic stream (so we can release it on
+  // stop), and a max-duration auto-stop timer.
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderChunksRef = useRef<Blob[]>([]);
+  const recorderStreamRef = useRef<MediaStream | null>(null);
+  const voiceAutoStopRef = useRef<number | null>(null);
 
   // Phase E ("coaching") used to auto-advance after 4 seconds. It now
   // waits for the user to click — we stash the original advance action
@@ -2950,7 +2953,7 @@ export default function Game({
       } else if (mode === "voice") {
         setVoicePhase("idle");
         setVoiceTranscript("");
-        voiceTranscriptRef.current = "";
+        setVoiceError(null);
         setDialog({ kind: "rep_input_voice" });
       }
     } else if (dialog.kind === "prospect_speaking" && dialog.done && mode) {
@@ -2998,91 +3001,153 @@ export default function Game({
     void submitRepTurn(t);
   }, [textInputValue, submitRepTurn]);
 
-  // ── Voice handling (Web Speech API, real-time) ──
-  const onVoiceStart = useCallback(() => {
-    const Ctor = getSpeechRecognitionCtor();
-    if (!Ctor) {
-      console.warn("[voice] SpeechRecognition unavailable");
-      return;
-    }
-    // Tear down any leftover instance from a prior run.
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.abort();
-      } catch {
-        /* ignore */
-      }
-      recognitionRef.current = null;
-    }
-    setVoiceTranscript("");
-    voiceTranscriptRef.current = "";
-    const recognition = new Ctor();
-    recognition.lang = "en-US";
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.onstart = () => {
-      console.log("[voice] onstart fired");
-    };
-    recognition.onresult = (event) => {
-      // Walk every result and concatenate — Web Speech may emit a
-      // chain of final + a trailing interim. The union is the best
-      // transcript so far.
-      let combined = "";
-      for (let i = 0; i < event.results.length; i++) {
-        combined += event.results[i][0].transcript;
-      }
-      console.log(
-        `[voice] onresult fired, transcript: ${JSON.stringify(combined)}`,
-      );
-      voiceTranscriptRef.current = combined;
-      setVoiceTranscript(combined);
-    };
-    recognition.onerror = (e) => {
-      // Common error codes: "not-allowed" (mic permission denied),
-      // "no-speech" (timeout, nothing heard), "audio-capture" (no mic),
-      // "network" (Chrome ships the recognizer over the network),
-      // "aborted" (we called abort()/stop()).
-      console.warn(
-        `[voice] onerror fired: ${e.error}${e.message ? ` — ${e.message}` : ""}`,
-      );
-      setVoicePhase("idle");
-    };
-    recognition.onend = () => {
-      console.log("[voice] onend fired");
-      // Promote whatever we captured to "confirming" if there's text;
-      // otherwise drop back to idle.
-      const final = voiceTranscriptRef.current.trim();
-      if (final.length > 0) {
-        setVoicePhase("confirming");
-      } else {
-        setVoicePhase("idle");
-      }
-      recognitionRef.current = null;
-    };
-    try {
-      console.log("[voice] recognition.start() called");
-      recognition.start();
-      recognitionRef.current = recognition;
-      setVoicePhase("listening");
-    } catch (err) {
-      // Most common: InvalidStateError from rapid double-clicks while a
-      // previous instance is still active. The abort() above usually
-      // prevents it, but we log + recover defensively.
-      console.warn("[voice] start() threw:", err);
-      setVoicePhase("idle");
+  // ── Voice handling (MediaRecorder → /api/transcribe-voice/Whisper) ──
+  const clearVoiceAutoStop = useCallback(() => {
+    if (voiceAutoStopRef.current != null) {
+      window.clearTimeout(voiceAutoStopRef.current);
+      voiceAutoStopRef.current = null;
     }
   }, []);
 
-  const onVoiceStop = useCallback(() => {
-    const r = recognitionRef.current;
-    if (r) {
+  const releaseMic = useCallback(() => {
+    recorderStreamRef.current?.getTracks().forEach((t) => {
       try {
-        r.stop();
+        t.stop();
       } catch {
         /* ignore */
       }
-    }
+    });
+    recorderStreamRef.current = null;
   }, []);
+
+  const onVoiceStart = useCallback(async () => {
+    console.log("[voice] onVoiceStart");
+    setVoiceError(null);
+    setVoiceTranscript("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log("[voice] mic stream acquired");
+      recorderStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      recorderChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recorderChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        console.log("[voice] recorder.onstop fired");
+        clearVoiceAutoStop();
+        const mime = recorder.mimeType || "audio/webm";
+        const blob = new Blob(recorderChunksRef.current, { type: mime });
+        recorderChunksRef.current = [];
+        releaseMic();
+
+        if (blob.size === 0) {
+          console.warn("[voice] empty blob — no audio captured");
+          setVoiceError("NO AUDIO CAPTURED — TRY AGAIN");
+          setVoicePhase("error");
+          return;
+        }
+
+        console.log(
+          `[voice] transcribing blob: size=${blob.size} type="${mime}"`,
+        );
+        setVoicePhase("transcribing");
+        try {
+          const form = new FormData();
+          // Match the file extension to the actual mime so /api/transcribe-voice
+          // hands Whisper something it can decode.
+          const ext = mime.includes("ogg")
+            ? "ogg"
+            : mime.includes("mp4") || mime.includes("mp4a")
+              ? "mp4"
+              : mime.includes("wav")
+                ? "wav"
+                : "webm";
+          form.append("audio", blob, `recording.${ext}`);
+          const res = await fetch("/api/transcribe-voice", {
+            method: "POST",
+            body: form,
+          });
+          if (!res.ok) {
+            const j = (await res.json().catch(() => ({}))) as {
+              error?: string;
+            };
+            throw new Error(j.error ?? `HTTP ${res.status}`);
+          }
+          const j = (await res.json()) as { text?: string };
+          const text = (j.text ?? "").trim();
+          if (text.length === 0) {
+            console.warn("[voice] empty transcript from /api/transcribe-voice");
+            setVoiceError("EMPTY TRANSCRIPT — TRY AGAIN");
+            setVoicePhase("error");
+            return;
+          }
+          console.log(
+            `[voice] transcript received (${text.length} chars): ${JSON.stringify(text.slice(0, 80))}…`,
+          );
+          setVoiceTranscript(text);
+          setVoicePhase("confirming");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn("[voice] transcription failed:", err);
+          setVoiceError(msg.slice(0, 80).toUpperCase());
+          setVoicePhase("error");
+        }
+      };
+
+      recorder.onerror = (e) => {
+        console.warn("[voice] recorder.onerror fired:", e);
+      };
+
+      console.log("[voice] recorder.start() called");
+      recorder.start();
+      recorderRef.current = recorder;
+      setVoicePhase("recording");
+
+      // Auto-stop after VOICE_MAX_RECORD_MS so a forgotten tab can't
+      // sit recording forever.
+      voiceAutoStopRef.current = window.setTimeout(() => {
+        console.log("[voice] auto-stop timer fired");
+        const r = recorderRef.current;
+        if (r && r.state !== "inactive") {
+          try {
+            r.stop();
+          } catch (err) {
+            console.warn("[voice] auto-stop r.stop() threw:", err);
+          }
+        }
+      }, VOICE_MAX_RECORD_MS) as unknown as number;
+    } catch (err) {
+      // getUserMedia rejected — typically NotAllowedError (permission
+      // denied) or NotFoundError (no mic device).
+      console.warn("[voice] getUserMedia failed:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      const friendly = /denied|not.allowed/i.test(msg)
+        ? "MIC ACCESS DENIED"
+        : /found|capture/i.test(msg)
+          ? "NO MICROPHONE FOUND"
+          : msg.slice(0, 80).toUpperCase();
+      setVoiceError(friendly);
+      setVoicePhase("error");
+      releaseMic();
+    }
+  }, [clearVoiceAutoStop, releaseMic]);
+
+  const onVoiceStop = useCallback(() => {
+    console.log("[voice] onVoiceStop");
+    clearVoiceAutoStop();
+    const r = recorderRef.current;
+    if (r && r.state !== "inactive") {
+      try {
+        r.stop();
+      } catch (err) {
+        console.warn("[voice] r.stop() threw:", err);
+      }
+    }
+    recorderRef.current = null;
+  }, [clearVoiceAutoStop]);
 
   const onVoiceSend = useCallback(() => {
     const t = voiceTranscript.trim();
@@ -3095,10 +3160,28 @@ export default function Game({
   }, [voiceTranscript, submitRepTurn]);
 
   const onVoiceRerecord = useCallback(() => {
+    console.log("[voice] onVoiceRerecord");
     setVoiceTranscript("");
-    voiceTranscriptRef.current = "";
+    setVoiceError(null);
     setVoicePhase("idle");
   }, []);
+
+  // Make sure mic + timers are cleaned up if the user navigates away
+  // mid-recording.
+  useEffect(
+    () => () => {
+      clearVoiceAutoStop();
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+      releaseMic();
+    },
+    [clearVoiceAutoStop, releaseMic],
+  );
 
   // Phase E click handler — runs whatever applyProspectTurn stashed
   // (next prospect line or outcome finalization) and clears the ref.
@@ -3296,7 +3379,7 @@ export default function Game({
           textInputValue={textInputValue}
           voicePhase={voicePhase}
           voiceTranscript={voiceTranscript}
-          voiceSupported={voiceSupported}
+          voiceError={voiceError}
           lastProspectLine={lastProspectLine}
           isMuted={isMuted}
           onToggleMute={toggleMuted}
@@ -3507,6 +3590,19 @@ function PixelGlobalStyles() {
       }
       .fc-pulse {
         animation: fc-pulse-kf 1s ease-in-out infinite;
+      }
+      @keyframes fc-wave-kf {
+        0%,
+        100% {
+          height: 6px;
+        }
+        50% {
+          height: 28px;
+        }
+      }
+      .fc-wave-bar {
+        height: 6px;
+        animation: fc-wave-kf 700ms ease-in-out infinite;
       }
       @keyframes fc-float-shake-kf {
         0%,
