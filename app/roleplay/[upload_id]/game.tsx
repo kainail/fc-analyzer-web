@@ -2271,6 +2271,14 @@ export default function Game({
   // can revoke it after playback ends.
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+
+  // The session/start response and the openSession→applyProspectTurn
+  // chain that triggers Phase A both run inside the same async handler
+  // tick. React hasn't committed setSession() by the time the first
+  // typewriter fires, so session?.archetype reads as null and TTS gets
+  // skipped on the opening turn. Stashing the archetype in a ref means
+  // it's available synchronously the moment session/start returns.
+  const archetypeRef = useRef<Archetype | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   // Hydrate the mute preference from localStorage after mount. We
   // can't read it synchronously during render because that would
@@ -2359,12 +2367,20 @@ export default function Game({
   }, []);
 
   const playProspectTts = useCallback(
-    async (text: string, archetype: Archetype) => {
+    async (text: string) => {
+      // Source the archetype from the ref so we can't race React's
+      // commit cycle on the very first turn (session/start → openSession
+      // → applyProspectTurn all run before the setSession state lands).
+      const archetype = archetypeRef.current;
       console.log(
-        `[tts] playProspectTts called: muted=${isMuted} archetype="${archetype}" textLen=${text.length}`,
+        `[tts] playProspectTts called: muted=${isMuted} archetype="${archetype ?? "null"}" textLen=${text.length}`,
       );
       if (isMuted) {
         console.log("[tts] skipped — muted");
+        return;
+      }
+      if (!archetype) {
+        console.warn("[tts] skipped — archetypeRef.current is null");
         return;
       }
       const voiceId = ARCHETYPE_VOICE_IDS[archetypeVoiceKey(archetype)];
@@ -2590,13 +2606,13 @@ export default function Game({
         // Kick off ElevenLabs playback in parallel with the typewriter —
         // we don't await so the text starts streaming immediately. The
         // function early-returns if muted or no voice id is configured.
-        const arch = session?.archetype;
-        if (arch) {
+        // archetype is sourced from archetypeRef inside playProspectTts.
+        if (archetypeRef.current) {
           console.log("Phase A triggered, calling TTS");
-          void playProspectTts(data.prospect_line, arch);
+          void playProspectTts(data.prospect_line);
         } else {
           console.warn(
-            "Phase A triggered but session has no archetype — TTS skipped",
+            "Phase A triggered but archetypeRef is null — TTS skipped",
           );
         }
         startTypewriter(data.prospect_line, "prospect_speaking", () => {
@@ -2625,7 +2641,7 @@ export default function Game({
 
       void currentMode;
     },
-    [labelKeyCounter, startTypewriter, finalizeOutcome, session, playProspectTts],
+    [labelKeyCounter, startTypewriter, finalizeOutcome, playProspectTts],
   );
 
   // ── Submit a rep turn ──
@@ -2724,6 +2740,10 @@ export default function Game({
           throw new Error(j.error ?? `HTTP ${res.status}`);
         }
         const data = (await res.json()) as SessionStartResponse;
+        // Stash archetype synchronously alongside setSession so TTS
+        // has it the moment Phase A fires — without waiting for React
+        // to commit the session state update.
+        archetypeRef.current = data.archetype;
         setSession(data);
         setMode(chosenMode);
         setResistance(data.starting_resistance);
@@ -2997,6 +3017,7 @@ export default function Game({
 
   const handlePlayAgain = useCallback(() => {
     setGameState("mode_select");
+    archetypeRef.current = null;
     setSession(null);
     setMode(null);
     setStartingMode(null);
