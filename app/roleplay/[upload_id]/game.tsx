@@ -2366,29 +2366,34 @@ export default function Game({
     }
   }, []);
 
+  // Two-stage: fetch the audio + load its metadata so the caller knows
+  // the duration before deciding the typewriter's per-character delay.
+  // The returned `play` closure starts actual playback when the caller
+  // is ready to also start the typewriter (so audio and text line up).
+  // Returns null when TTS is skipped (muted, no archetype, no voice id)
+  // or when any step fails — caller falls back to fixed typewriter ms.
   const playProspectTts = useCallback(
-    async (text: string) => {
-      // Source the archetype from the ref so we can't race React's
-      // commit cycle on the very first turn (session/start → openSession
-      // → applyProspectTurn all run before the setSession state lands).
+    async (
+      text: string,
+    ): Promise<{ play: () => void; durationMs: number } | null> => {
       const archetype = archetypeRef.current;
       console.log(
         `[tts] playProspectTts called: muted=${isMuted} archetype="${archetype ?? "null"}" textLen=${text.length}`,
       );
       if (isMuted) {
         console.log("[tts] skipped — muted");
-        return;
+        return null;
       }
       if (!archetype) {
         console.warn("[tts] skipped — archetypeRef.current is null");
-        return;
+        return null;
       }
       const voiceId = ARCHETYPE_VOICE_IDS[archetypeVoiceKey(archetype)];
       if (!voiceId || voiceId === "PLACEHOLDER") {
         console.log(
           `[tts] skipped — no voiceId for archetypeKey="${archetypeVoiceKey(archetype)}"`,
         );
-        return;
+        return null;
       }
       // Stop anything still playing from the previous turn before
       // kicking off a new fetch.
@@ -2407,7 +2412,7 @@ export default function Game({
           console.warn(
             `[tts] /api/roleplay/tts returned ${res.status}: ${errText.slice(0, 200)}`,
           );
-          return;
+          return null;
         }
         const blob = await res.blob();
         console.log(
@@ -2415,12 +2420,11 @@ export default function Game({
         );
         if (blob.size === 0) {
           console.warn("[tts] empty blob — aborting playback");
-          return;
+          return null;
         }
-        // If the rep muted while we were waiting, bail before playing.
         if (isMuted) {
           console.log("[tts] muted while fetching — discarding blob");
-          return;
+          return null;
         }
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
@@ -2441,18 +2445,54 @@ export default function Game({
         };
         audioRef.current = audio;
         audioUrlRef.current = url;
-        await audio.play().then(
-          () => console.log("[tts] audio.play() started"),
-          (err) => {
-            // Autoplay can be blocked until the user interacts with the
-            // page. The unlock effect above tries to satisfy this on the
-            // first click — but if the page never received one before
-            // Phase A, this rejection is expected.
-            console.warn("[tts] audio.play() rejected:", err);
+
+        // Wait for metadata so audio.duration is reliable. Some browsers
+        // need .load() called explicitly; setting src already triggers
+        // it but calling load() doesn't hurt.
+        const durationMs = await new Promise<number>((resolve) => {
+          const fallback = window.setTimeout(() => {
+            console.warn("[tts] loadedmetadata timed out at 4000ms");
+            resolve(0);
+          }, 4000);
+          audio.onloadedmetadata = () => {
+            window.clearTimeout(fallback);
+            const d = audio.duration;
+            if (Number.isFinite(d) && d > 0) {
+              console.log(`[tts] metadata loaded: duration=${d.toFixed(2)}s`);
+              resolve(d * 1000);
+            } else {
+              console.warn(`[tts] metadata loaded but duration=${d}`);
+              resolve(0);
+            }
+          };
+          // Defensive: some MP3s never fire loadedmetadata but DO fire
+          // canplaythrough with a known duration.
+          audio.oncanplaythrough = () => {
+            if (audioRef.current !== audio) return;
+            const d = audio.duration;
+            if (Number.isFinite(d) && d > 0) {
+              window.clearTimeout(fallback);
+              resolve(d * 1000);
+            }
+          };
+        });
+
+        return {
+          durationMs,
+          play: () => {
+            // If the rep muted between metadata-load and play, bail.
+            if (isMuted || audioRef.current !== audio) return;
+            audio.play().then(
+              () => console.log("[tts] audio.play() started"),
+              (err) => {
+                console.warn("[tts] audio.play() rejected:", err);
+              },
+            );
           },
-        );
+        };
       } catch (err) {
         console.warn("[tts] fetch failed:", err);
+        return null;
       }
     },
     [isMuted, stopProspectTts],
@@ -2474,9 +2514,16 @@ export default function Game({
   const archetype: Archetype | null = session?.archetype ?? null;
 
   // Typewriter — declared first so applyProspectTurn can reference it.
+  // delayMs is the per-character interval; callers compute it from
+  // audio duration when TTS is active, or pass TYPEWRITER_MS otherwise.
   const typewriterRef = useRef<{ raf: number | null }>({ raf: null });
   const startTypewriter = useCallback(
-    (text: string, kind: "prospect_speaking" | "exit_line", onDone: () => void) => {
+    (
+      text: string,
+      kind: "prospect_speaking" | "exit_line",
+      delayMs: number,
+      onDone: () => void,
+    ) => {
       if (typewriterRef.current.raf != null) {
         clearTimeout(typewriterRef.current.raf);
       }
@@ -2493,12 +2540,12 @@ export default function Game({
         setDialog({ kind, text, charsShown: idx, done: false });
         typewriterRef.current.raf = window.setTimeout(
           tick,
-          TYPEWRITER_MS,
+          delayMs,
         ) as unknown as number;
       };
       typewriterRef.current.raf = window.setTimeout(
         tick,
-        TYPEWRITER_MS,
+        delayMs,
       ) as unknown as number;
     },
     [],
@@ -2601,23 +2648,54 @@ export default function Game({
       // Check outcome before showing coaching whisper
       const outcomeNow = data.session_state?.outcome ?? null;
 
-      const runProspectTypewriter = () => {
+      const runProspectTypewriter = async () => {
         setGameState("battle");
-        // Kick off ElevenLabs playback in parallel with the typewriter —
-        // we don't await so the text starts streaming immediately. The
-        // function early-returns if muted or no voice id is configured.
-        // archetype is sourced from archetypeRef inside playProspectTts.
+        // Reset the dialog box immediately so the rep isn't staring at
+        // the prior coaching/evaluating text while we wait for the audio
+        // fetch + metadata load.
+        setDialog({
+          kind: "prospect_speaking",
+          text: data.prospect_line,
+          charsShown: 0,
+          done: false,
+        });
+
+        let delayMs = TYPEWRITER_MS;
+        let ready: { play: () => void; durationMs: number } | null = null;
+
         if (archetypeRef.current) {
           console.log("Phase A triggered, calling TTS");
-          void playProspectTts(data.prospect_line);
+          ready = await playProspectTts(data.prospect_line);
+          if (
+            ready &&
+            ready.durationMs > 0 &&
+            data.prospect_line.length > 0
+          ) {
+            const perChar = ready.durationMs / data.prospect_line.length;
+            // Clamp so jittery duration estimates can't make the
+            // typewriter unreadably fast or slow.
+            delayMs = Math.max(20, Math.min(120, perChar));
+            console.log(
+              `[tts] sync: durationMs=${ready.durationMs.toFixed(0)} chars=${data.prospect_line.length} delayMs=${delayMs.toFixed(1)}`,
+            );
+          }
         } else {
           console.warn(
             "Phase A triggered but archetypeRef is null — TTS skipped",
           );
         }
-        startTypewriter(data.prospect_line, "prospect_speaking", () => {
-          // typewriter done — wait for user advance
-        });
+
+        // Fire audio + typewriter at the same moment so the spoken
+        // line tracks the on-screen text.
+        ready?.play();
+        startTypewriter(
+          data.prospect_line,
+          "prospect_speaking",
+          delayMs,
+          () => {
+            // typewriter done — wait for user advance
+          },
+        );
       };
 
       if (!isOpen && data.turn_feedback) {
@@ -2629,14 +2707,14 @@ export default function Game({
           if (outcomeNow) {
             finalizeOutcome(outcomeNow, data);
           } else {
-            runProspectTypewriter();
+            void runProspectTypewriter();
           }
         };
         setDialog({ kind: "coaching", text: data.turn_feedback });
       } else if (outcomeNow) {
         finalizeOutcome(outcomeNow, data);
       } else {
-        runProspectTypewriter();
+        void runProspectTypewriter();
       }
 
       void currentMode;
