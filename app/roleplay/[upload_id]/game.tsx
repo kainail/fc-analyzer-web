@@ -175,6 +175,30 @@ const LABEL_FLOAT_MS = 800;
 const RES_BAR_TRANSITION_MS = 400;
 const TEXT_MAX_LEN = 280;
 
+// localStorage key for the mute toggle, so the rep's preference
+// survives page refreshes.
+const MUTE_STORAGE_KEY = "roleplay_muted";
+
+// ElevenLabs voice IDs per archetype. Placeholders for now — replace
+// with real voice IDs from the ElevenLabs voice library. Keys are
+// snake_case derived from the archetype name.
+const ARCHETYPE_VOICE_IDS: Record<string, string> = {
+  busy_professional: "PLACEHOLDER",
+  skeptic: "PLACEHOLDER",
+  enthusiast: "PLACEHOLDER",
+  decision_maker_blocker: "PLACEHOLDER",
+  price_shopper: "PLACEHOLDER",
+  ghost: "PLACEHOLDER",
+};
+
+function archetypeVoiceKey(archetype: string): string {
+  return archetype
+    .toLowerCase()
+    .replace(/^the\s+/, "")
+    .trim()
+    .replace(/\s+/g, "_");
+}
+
 // ───────────────────────────────────────────────────────────────────
 // Pixel sprites (16×16 grid; each char = palette index or '.' = transparent)
 // '1' = darkest, '2' = dark, '3' = light, '4' = lightest
@@ -928,6 +952,8 @@ function BattleView(props: {
   voiceTranscript: string;
   voiceError: string | null;
   lastProspectLine: string;
+  isMuted: boolean;
+  onToggleMute: () => void;
   onAdvanceProspect: () => void;
   onAdvanceCoaching: () => void;
   onSelectMc: (opt: McOption) => void;
@@ -1126,6 +1152,35 @@ function BattleView(props: {
             }}
           />
         </div>
+
+        {/* Mute toggle — overlay outside the scaled canvas, top-right of
+            the canvas area. Sibling of the canvas so it isn't affected
+            by the canvas's transform: scale(). */}
+        <button
+          type="button"
+          onClick={props.onToggleMute}
+          aria-label={props.isMuted ? "Unmute prospect voice" : "Mute prospect voice"}
+          title={props.isMuted ? "Unmute prospect voice" : "Mute prospect voice"}
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            width: 36,
+            height: 36,
+            background: "var(--surface-2)",
+            border: "1px solid var(--border-strong)",
+            borderRadius: 6,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 16,
+            color: "var(--ink)",
+            padding: 0,
+          }}
+        >
+          {props.isMuted ? "🔇" : "🔊"}
+        </button>
       </div>
 
       <HtmlDialogBox
@@ -2210,6 +2265,118 @@ export default function Game({
   // here when entering coaching, and the click handler pulls it out.
   const coachingAdvanceRef = useRef<(() => void) | null>(null);
 
+  // ElevenLabs TTS playback for Phase A prospect lines. audioRef holds
+  // the currently-playing <audio> instance so we can stop it if the
+  // rep clicks through early. audioUrlRef holds the blob: URL so we
+  // can revoke it after playback ends.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
+  // Hydrate the mute preference from localStorage after mount. We
+  // can't read it synchronously during render because that would
+  // mismatch the server-rendered HTML — so the post-mount setState is
+  // the hydration pattern React explicitly allows here.
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(MUTE_STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (stored === "1") setIsMuted(true);
+    } catch {
+      // localStorage unavailable (private mode, etc.) — ignore.
+    }
+  }, []);
+  const toggleMuted = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(MUTE_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        // best-effort
+      }
+      if (next && audioRef.current) {
+        // Killing audio in flight if the rep mutes mid-playback.
+        audioRef.current.pause();
+        audioRef.current = null;
+        if (audioUrlRef.current) {
+          URL.revokeObjectURL(audioUrlRef.current);
+          audioUrlRef.current = null;
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const stopProspectTts = useCallback(() => {
+    if (audioRef.current) {
+      try {
+        audioRef.current.pause();
+      } catch {
+        // ignore
+      }
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+  }, []);
+
+  const playProspectTts = useCallback(
+    async (text: string, archetype: Archetype) => {
+      if (isMuted) return;
+      const voiceId = ARCHETYPE_VOICE_IDS[archetypeVoiceKey(archetype)];
+      if (!voiceId || voiceId === "PLACEHOLDER") return;
+      // Stop anything still playing from the previous turn before
+      // kicking off a new fetch.
+      stopProspectTts();
+      try {
+        const res = await fetch("/api/roleplay/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, voiceId }),
+        });
+        if (!res.ok) {
+          console.warn(`[tts] /api/roleplay/tts returned ${res.status}`);
+          return;
+        }
+        const blob = await res.blob();
+        // If the rep muted while we were waiting, bail before playing.
+        if (isMuted) return;
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => {
+          if (audioRef.current === audio) audioRef.current = null;
+          if (audioUrlRef.current === url) {
+            URL.revokeObjectURL(url);
+            audioUrlRef.current = null;
+          }
+        };
+        audio.onerror = () => {
+          if (audioRef.current === audio) audioRef.current = null;
+          if (audioUrlRef.current === url) {
+            URL.revokeObjectURL(url);
+            audioUrlRef.current = null;
+          }
+        };
+        audioRef.current = audio;
+        audioUrlRef.current = url;
+        await audio.play().catch((err) => {
+          // Autoplay can be blocked until the user interacts with the
+          // page. Swallow the rejection; the rest of the turn still
+          // proceeds without audio.
+          console.warn("[tts] audio.play() rejected:", err);
+        });
+      } catch (err) {
+        console.warn("[tts] fetch failed:", err);
+      }
+    },
+    [isMuted, stopProspectTts],
+  );
+
+  // Stop any audio on unmount so we don't leak handles or play after
+  // the component is gone.
+  useEffect(() => stopProspectTts, [stopProspectTts]);
+
   // Final outcome bookkeeping
   const [outcome, setOutcome] = useState<
     "win" | "loss_walkout" | "loss_timeout" | "draw" | null
@@ -2351,6 +2518,11 @@ export default function Game({
 
       const runProspectTypewriter = () => {
         setGameState("battle");
+        // Kick off ElevenLabs playback in parallel with the typewriter —
+        // we don't await so the text starts streaming immediately. The
+        // function early-returns if muted or no voice id is configured.
+        const arch = session?.archetype;
+        if (arch) void playProspectTts(data.prospect_line, arch);
         startTypewriter(data.prospect_line, "prospect_speaking", () => {
           // typewriter done — wait for user advance
         });
@@ -2377,7 +2549,7 @@ export default function Game({
 
       void currentMode;
     },
-    [labelKeyCounter, startTypewriter, finalizeOutcome],
+    [labelKeyCounter, startTypewriter, finalizeOutcome, session, playProspectTts],
   );
 
   // ── Submit a rep turn ──
@@ -2511,6 +2683,9 @@ export default function Game({
       mode &&
       pendingOptions
     ) {
+      // Click after typewriter finished — stop the audio (the rep is
+      // moving past Phase A) and open the input phase.
+      stopProspectTts();
       if (mode === "multiple_choice") {
         setDialog({ kind: "rep_input_mc", options: pendingOptions });
       } else if (mode === "text") {
@@ -2523,6 +2698,7 @@ export default function Game({
         setDialog({ kind: "rep_input_voice" });
       }
     } else if (dialog.kind === "prospect_speaking" && dialog.done && mode) {
+      stopProspectTts();
       if (mode === "text") {
         setTextInputValue("");
         setDialog({ kind: "rep_input_text" });
@@ -2536,6 +2712,9 @@ export default function Game({
       dialog.kind === "prospect_speaking" &&
       !dialog.done
     ) {
+      // Click during typewriter — skip to end. Per spec, also kill the
+      // audio (the rep is choosing to read ahead rather than listen).
+      stopProspectTts();
       if (typewriterRef.current.raf != null) {
         clearTimeout(typewriterRef.current.raf);
         typewriterRef.current.raf = null;
@@ -2547,7 +2726,7 @@ export default function Game({
         done: true,
       });
     }
-  }, [dialog, mode, pendingOptions]);
+  }, [dialog, mode, pendingOptions, stopProspectTts]);
 
   const onSelectMc = useCallback(
     (opt: McOption) => {
@@ -2842,6 +3021,8 @@ export default function Game({
           voiceTranscript={voiceTranscript}
           voiceError={voiceError}
           lastProspectLine={lastProspectLine}
+          isMuted={isMuted}
+          onToggleMute={toggleMuted}
           onAdvanceProspect={advanceProspect}
           onAdvanceCoaching={handleAdvanceCoaching}
           onSelectMc={onSelectMc}
