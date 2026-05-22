@@ -973,19 +973,25 @@ function BattleView(props: {
   return (
     <div
       style={{
-        position: "fixed",
-        inset: 0,
+        // Natural document flow — no position: fixed, no viewport-height
+        // cap. The page scrolls when canvas + dialog exceed the viewport
+        // so the MC options never get clipped off the bottom.
+        minHeight: "100vh",
         background: "var(--bg)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         padding: 16,
         gap: 16,
-        overflow: "auto",
+        overflowY: "auto",
       }}
     >
       <div
         style={{
+          // Explicit visual size so document flow accounts for the CSS
+          // transform: scale() on the inner canvas (transform doesn't
+          // affect layout). This keeps the top of the canvas from being
+          // clipped and stops surrounding elements from overlapping it.
           width: 160 * scale,
           height: 96 * scale,
           position: "relative",
