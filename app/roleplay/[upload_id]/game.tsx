@@ -2331,8 +2331,10 @@ export default function Game({
   // on this so unsupported browsers fall back to the text input.
   const [voiceSupported, setVoiceSupported] = useState(true);
   useEffect(() => {
+    const supported = getSpeechRecognitionCtor() !== null;
+    console.log(`[voice] SpeechRecognition supported: ${supported}`);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setVoiceSupported(getSpeechRecognitionCtor() !== null);
+    setVoiceSupported(supported);
   }, []);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   // Most-recent transcript snapshot — kept in a ref so the onend
@@ -3018,6 +3020,9 @@ export default function Game({
     recognition.lang = "en-US";
     recognition.continuous = false;
     recognition.interimResults = true;
+    recognition.onstart = () => {
+      console.log("[voice] onstart fired");
+    };
     recognition.onresult = (event) => {
       // Walk every result and concatenate — Web Speech may emit a
       // chain of final + a trailing interim. The union is the best
@@ -3026,15 +3031,24 @@ export default function Game({
       for (let i = 0; i < event.results.length; i++) {
         combined += event.results[i][0].transcript;
       }
+      console.log(
+        `[voice] onresult fired, transcript: ${JSON.stringify(combined)}`,
+      );
       voiceTranscriptRef.current = combined;
       setVoiceTranscript(combined);
     };
     recognition.onerror = (e) => {
-      console.warn("[voice] recognition error:", e.error);
-      // On error, return to idle so the rep can tap again.
+      // Common error codes: "not-allowed" (mic permission denied),
+      // "no-speech" (timeout, nothing heard), "audio-capture" (no mic),
+      // "network" (Chrome ships the recognizer over the network),
+      // "aborted" (we called abort()/stop()).
+      console.warn(
+        `[voice] onerror fired: ${e.error}${e.message ? ` — ${e.message}` : ""}`,
+      );
       setVoicePhase("idle");
     };
     recognition.onend = () => {
+      console.log("[voice] onend fired");
       // Promote whatever we captured to "confirming" if there's text;
       // otherwise drop back to idle.
       const final = voiceTranscriptRef.current.trim();
@@ -3046,10 +3060,14 @@ export default function Game({
       recognitionRef.current = null;
     };
     try {
+      console.log("[voice] recognition.start() called");
       recognition.start();
       recognitionRef.current = recognition;
       setVoicePhase("listening");
     } catch (err) {
+      // Most common: InvalidStateError from rapid double-clicks while a
+      // previous instance is still active. The abort() above usually
+      // prevents it, but we log + recover defensively.
       console.warn("[voice] start() threw:", err);
       setVoicePhase("idle");
     }
