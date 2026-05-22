@@ -183,12 +183,12 @@ const MUTE_STORAGE_KEY = "roleplay_muted";
 // with real voice IDs from the ElevenLabs voice library. Keys are
 // snake_case derived from the archetype name.
 const ARCHETYPE_VOICE_IDS: Record<string, string> = {
-  busy_professional: "PLACEHOLDER",
-  skeptic: "PLACEHOLDER",
-  enthusiast: "PLACEHOLDER",
-  decision_maker_blocker: "PLACEHOLDER",
-  price_shopper: "PLACEHOLDER",
-  ghost: "PLACEHOLDER",
+  busy_professional: "bfGb7JTLUnZebZRiFYyq",
+  skeptic: "T5cu6IU92Krx4mh43osx",
+  enthusiast: "hod33eJyEU4TLqiYFttr",
+  decision_maker_blocker: "jhjua7BeakSijhQFhAX5",
+  price_shopper: "uA0L9FxeLpzlG615Ueay",
+  ghost: "mqyRCI8OeJTogXjYUGZ5",
 };
 
 function archetypeVoiceKey(archetype: string): string {
