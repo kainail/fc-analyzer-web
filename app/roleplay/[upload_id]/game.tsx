@@ -166,10 +166,6 @@ type GameProps = {
 // Constants
 // ───────────────────────────────────────────────────────────────────
 
-const DEFAULT_PALETTE = ["#0f380f", "#306230", "#8bac0f", "#9bbc0f"] as const;
-const GHOST_OPEN_PALETTE = ["#0f1a2e", "#1a3a5c", "#4a7ab0", "#b0d4f5"] as const;
-const DEFEAT_PALETTE = ["#080c08", "#1a2a18", "#456007", "#5a7008"] as const;
-
 const TYPEWRITER_MS = 40;
 const LABEL_FLOAT_MS = 800;
 const RES_BAR_TRANSITION_MS = 400;
@@ -205,158 +201,8 @@ function archetypeVoiceKey(archetype: string): string {
 }
 
 // ───────────────────────────────────────────────────────────────────
-// Pixel sprites (16×16 grid; each char = palette index or '.' = transparent)
-// '1' = darkest, '2' = dark, '3' = light, '4' = lightest
-// ───────────────────────────────────────────────────────────────────
-
-type SpriteGrid = readonly string[];
-
-const SPRITE_BUSY: SpriteGrid = [
-  "................",
-  ".....111111.....",
-  "....12222221....",
-  "...1233333321...",
-  "...1234334321...",
-  "...1233333321...",
-  "....12222221....",
-  ".....111111.....",
-  "....11222211....",
-  "...12222222221..",
-  "..122222122221..",
-  "..122221122221..",
-  "..122221122221..",
-  "..122222222221..",
-  "..111111111111..",
-  "...11.....11....",
-];
-
-const SPRITE_SKEPTIC: SpriteGrid = [
-  "................",
-  "....11111111....",
-  "...1222222221...",
-  "...1233333321...",
-  "..12333333332...",
-  "..12331122331...",
-  "..12331122331...",
-  "...1233333321...",
-  "...1223333221...",
-  "....12211221....",
-  "....11111111....",
-  "..122122122122..",
-  "..122122122122..",
-  "..122122122122..",
-  "..222222222222..",
-  "..11.......11...",
-];
-
-const SPRITE_ENTHUSIAST: SpriteGrid = [
-  "................",
-  "....11111111....",
-  "...1333333331...",
-  "..122222222221..",
-  "..123333333321..",
-  "..123113113321..",
-  "..123113113321..",
-  "..123333333321..",
-  "..123322233321..",
-  "...1233333321...",
-  "....12333321....",
-  "...12333333321..",
-  "..1233444433321.",
-  "..1233444433321.",
-  "..1233222233321.",
-  "...111....111...",
-];
-
-const SPRITE_BLOCKER: SpriteGrid = [
-  "................",
-  ".....111111.....",
-  "....12222221....",
-  "...1233333321...",
-  "..12333333321...",
-  "..123311113321..",
-  "..123322223321..",
-  "..123333333321..",
-  "...12333321...4.",
-  "....11111111....",
-  "...12222222221..",
-  "..122212222221..",
-  "..122212222221..",
-  "..122222222221..",
-  "..111111111111..",
-  "...11.....11....",
-];
-
-const SPRITE_PRICE: SpriteGrid = [
-  "................",
-  "....11111111....",
-  "...1222222221...",
-  "..12333333321...",
-  "..12333113321...",
-  "..12333113321...",
-  "..12333333321...",
-  "...1233333321...",
-  "....12211221....",
-  "....11111111....",
-  "...12222222221..",
-  "..1222113222221.",
-  "..1222113222221.",
-  "..1222333222221.",
-  "..1111111111111.",
-  "...11.....11....",
-];
-
-const SPRITE_GHOST: SpriteGrid = [
-  "................",
-  ".....111111.....",
-  "....11122211....",
-  "...112222221....",
-  "...1222222221...",
-  "...1232222321...",
-  "...1233333321...",
-  "....12222221....",
-  "....11111111....",
-  "...122222221....",
-  "...122222221....",
-  "..12222222221...",
-  "..12222222221...",
-  "..12222222221...",
-  "..11........11..",
-  "..11........11..",
-];
-
-const SPRITES_IDLE: Record<Archetype, SpriteGrid> = {
-  "The Busy Professional": SPRITE_BUSY,
-  "The Skeptic": SPRITE_SKEPTIC,
-  "The Enthusiast": SPRITE_ENTHUSIAST,
-  "The Decision Maker Blocker": SPRITE_BLOCKER,
-  "The Price Shopper": SPRITE_PRICE,
-  "The Ghost": SPRITE_GHOST,
-};
-
-// Speaking variant: mouth row shifted to "open" pattern. Reuses idle
-// for everything else — the typewriter timing animates it.
-function withSpeakingMouth(grid: SpriteGrid): SpriteGrid {
-  const out = grid.slice();
-  if (out.length > 9) {
-    out[9] = "....12233221....";
-  }
-  return out;
-}
-
-// ───────────────────────────────────────────────────────────────────
 // Helpers
 // ───────────────────────────────────────────────────────────────────
-
-function pickPalette(
-  archetype: Archetype,
-  wallDropped: boolean,
-  victoryDarken: boolean,
-): readonly string[] {
-  if (victoryDarken) return DEFEAT_PALETTE;
-  if (archetype === "The Ghost" && wallDropped) return GHOST_OPEN_PALETTE;
-  return DEFAULT_PALETTE;
-}
 
 function labelColor(kind: FloatingLabelKind | null): string {
   switch (kind) {
@@ -421,50 +267,1037 @@ function objectiveBadgeColor(status: string | undefined): {
 }
 
 // ───────────────────────────────────────────────────────────────────
-// Pixel sprite renderer
+// Prospect sprite — illustrated SVG portraits per archetype.
+// viewBox: 0 0 340 420. Animation classes (fc-sprite-idle / flinch /
+// hardening / leaving / converted) live on the root <svg> so the
+// existing CSS keyframes still drive movement.
 // ───────────────────────────────────────────────────────────────────
 
-function PixelSprite({
-  grid,
-  palette,
-  pixel = 4,
+function archetypeSpriteKey(archetype: string): string {
+  return archetype
+    .toLowerCase()
+    .replace(/^the\s+/, "")
+    .trim()
+    .replace(/\s+/g, "_");
+}
+
+function BusyProfessionalBody() {
+  return (
+    <g>
+      <circle cx={170} cy={260} r={180} fill="#1e2937" opacity={0.5} />
+      <rect x={119} y={229} width={102} height={89} rx={6} fill="#1f2937" />
+      <polygon points="119,229 145,229 163,190 119,181" fill="#111827" />
+      <polygon points="221,229 197,229 179,190 221,181" fill="#111827" />
+      <rect x={156} y={229} width={28} height={50} rx={2} fill="#f8fafc" />
+      <polygon
+        points="163,230 177,230 173,278 170,284 167,278"
+        fill="#dc2626"
+      />
+      <rect x={100} y={254} width={9} height={6} rx={2} fill="#f59e0b" />
+      <rect x={102} y={256} width={5} height={3} rx={1} fill="#1f2937" />
+      <rect x={100} y={249} width={28} height={14} rx={7} fill="#1f2937" />
+      <ellipse cx={107} cy={256} rx={8} ry={7} fill="#d4a882" />
+      <rect x={212} y={230} width={16} height={45} rx={8} fill="#1f2937" />
+      <ellipse cx={220} cy={276} rx={7} ry={6} fill="#d4a882" />
+      <rect x={215} y={268} width={11} height={16} rx={2} fill="#111827" />
+      <rect
+        x={216}
+        y={270}
+        width={9}
+        height={12}
+        rx={1}
+        fill="#3b82f6"
+        opacity={0.7}
+      />
+      <rect x={158} y={204} width={24} height={30} rx={4} fill="#d4a882" />
+      <ellipse cx={170} cy={161} rx={38} ry={36} fill="#d4a882" />
+      <ellipse cx={170} cy={132} rx={38} ry={15} fill="#2d1b0e" />
+      <rect x={132} y={132} width={76} height={14} fill="#2d1b0e" />
+      <rect x={132} y={140} width={8} height={16} rx={3} fill="#2d1b0e" />
+      <rect x={200} y={140} width={8} height={16} rx={3} fill="#2d1b0e" />
+      <line
+        x1={147}
+        y1={132}
+        x2={147}
+        y2={152}
+        stroke="#1a0f08"
+        strokeWidth={1.5}
+      />
+      <ellipse cx={132} cy={163} rx={6} ry={8} fill="#d4a882" />
+      <ellipse cx={208} cy={163} rx={6} ry={8} fill="#d4a882" />
+      <ellipse cx={155} cy={158} rx={6} ry={4} fill="#1a1008" />
+      <ellipse cx={185} cy={158} rx={6} ry={4} fill="#1a1008" />
+      <ellipse cx={156} cy={157} rx={2.5} ry={2} fill="#78350f" />
+      <ellipse cx={186} cy={157} rx={2.5} ry={2} fill="#78350f" />
+      <circle cx={158} cy={156} r={1} fill="#ffffff" opacity={0.8} />
+      <circle cx={188} cy={156} r={1} fill="#ffffff" opacity={0.8} />
+      <path
+        d="M147 149 Q155 145 163 148"
+        fill="none"
+        stroke="#2d1b0e"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M177 148 Q185 145 193 148"
+        fill="none"
+        stroke="#2d1b0e"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M166 165 Q164 174 160 176 Q170 179 180 176 Q176 174 174 165"
+        fill="none"
+        stroke="#b8785a"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M160 188 Q165 185 170 186 Q175 185 180 188"
+        fill="none"
+        stroke="#b8785a"
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <rect x={131} y={311} width={31} height={26} rx={6} fill="#1f2937" />
+      <rect x={178} y={311} width={31} height={26} rx={6} fill="#1f2937" />
+      <rect x={125} y={329} width={40} height={9} rx={5} fill="#111827" />
+      <rect x={172} y={329} width={40} height={9} rx={5} fill="#111827" />
+    </g>
+  );
+}
+
+function SkepticBody() {
+  return (
+    <g>
+      <circle cx={170} cy={260} r={180} fill="#1e3a8a" opacity={0.3} />
+      <rect x={120} y={230} width={100} height={88} rx={6} fill="#1e293b" />
+      <polygon points="120,230 146,230 163,192 120,182" fill="#0f172a" />
+      <polygon points="220,230 194,230 177,192 220,182" fill="#0f172a" />
+      <rect x={154} y={230} width={32} height={48} rx={2} fill="#f1f5f9" />
+      <polygon
+        points="163,231 177,231 173,276 170,284 167,276"
+        fill="#7f1d1d"
+      />
+      <rect x={166} y={248} width={7} height={5} rx={1} fill="#991b1b" />
+      <rect x={100} y={250} width={28} height={14} rx={7} fill="#1e293b" />
+      <rect x={115} y={242} width={78} height={16} rx={7} fill="#1e293b" />
+      <ellipse cx={193} cy={250} rx={9} ry={7} fill="#c9956a" />
+      <ellipse cx={118} cy={257} rx={7} ry={6} fill="#c9956a" />
+      <rect x={159} y={206} width={22} height={28} rx={4} fill="#c9956a" />
+      <rect x={136} y={130} width={68} height={82} rx={10} fill="#c9956a" />
+      <rect x={136} y={130} width={68} height={16} rx={9} fill="#1e1008" />
+      <rect x={136} y={138} width={11} height={14} fill="#1e1008" />
+      <rect x={193} y={138} width={11} height={14} fill="#1e1008" />
+      <ellipse cx={136} cy={172} rx={6} ry={8} fill="#c9956a" />
+      <ellipse cx={204} cy={172} rx={6} ry={8} fill="#c9956a" />
+      <rect
+        x={140}
+        y={158}
+        width={24}
+        height={16}
+        rx={4}
+        fill="none"
+        stroke="#1e1008"
+        strokeWidth={3}
+      />
+      <rect
+        x={176}
+        y={158}
+        width={24}
+        height={16}
+        rx={4}
+        fill="none"
+        stroke="#1e1008"
+        strokeWidth={3}
+      />
+      <line
+        x1={164}
+        y1={166}
+        x2={176}
+        y2={166}
+        stroke="#1e1008"
+        strokeWidth={2.5}
+      />
+      <line
+        x1={140}
+        y1={166}
+        x2={136}
+        y2={165}
+        stroke="#1e1008"
+        strokeWidth={2}
+      />
+      <line
+        x1={200}
+        y1={166}
+        x2={204}
+        y2={165}
+        stroke="#1e1008"
+        strokeWidth={2}
+      />
+      <rect
+        x={140}
+        y={158}
+        width={24}
+        height={16}
+        rx={4}
+        fill="#334155"
+        opacity={0.35}
+      />
+      <rect
+        x={176}
+        y={158}
+        width={24}
+        height={16}
+        rx={4}
+        fill="#334155"
+        opacity={0.35}
+      />
+      <ellipse cx={152} cy={166} rx={5} ry={4} fill="#1e1008" />
+      <ellipse cx={188} cy={166} rx={5} ry={4} fill="#1e1008" />
+      <ellipse cx={153} cy={165} rx={2} ry={2} fill="#475569" />
+      <ellipse cx={189} cy={165} rx={2} ry={2} fill="#475569" />
+      <circle cx={155} cy={164} r={1} fill="#ffffff" opacity={0.7} />
+      <circle cx={191} cy={164} r={1} fill="#ffffff" opacity={0.7} />
+      <path
+        d="M141 153 Q152 147 163 151"
+        fill="none"
+        stroke="#1e1008"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M177 156 Q188 154 199 156"
+        fill="none"
+        stroke="#1e1008"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M166 174 Q164 183 160 185 Q170 188 180 185 Q176 183 174 174"
+        fill="none"
+        stroke="#a0724f"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M158 200 Q164 197 170 198 Q176 197 182 200"
+        fill="none"
+        stroke="#a0724f"
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <rect x={130} y={312} width={30} height={26} rx={5} fill="#1e293b" />
+      <rect x={178} y={312} width={30} height={26} rx={5} fill="#1e293b" />
+      <rect x={124} y={330} width={40} height={9} rx={5} fill="#0f172a" />
+      <rect x={172} y={330} width={40} height={9} rx={5} fill="#0f172a" />
+    </g>
+  );
+}
+
+function EnthusiastBody() {
+  return (
+    <g>
+      <circle cx={170} cy={260} r={180} fill="#0d9488" opacity={0.25} />
+      <rect x={121} y={225} width={98} height={90} rx={6} fill="#0d9488" />
+      <rect
+        x={121}
+        y={235}
+        width={10}
+        height={75}
+        rx={3}
+        fill="#0f766e"
+        opacity={0.6}
+      />
+      <rect
+        x={209}
+        y={235}
+        width={10}
+        height={75}
+        rx={3}
+        fill="#0f766e"
+        opacity={0.6}
+      />
+      <path d="M155,225 Q170,238 185,225" fill="#0f766e" />
+      <circle cx={152} cy={258} r={7} fill="#14b8a6" opacity={0.4} />
+      <circle cx={152} cy={258} r={4} fill="#2dd4bf" opacity={0.5} />
+      <rect x={100} y={228} width={28} height={15} rx={7} fill="#0d9488" />
+      <ellipse cx={104} cy={235} rx={9} ry={7} fill="#e8c49a" />
+      <rect x={212} y={228} width={28} height={15} rx={7} fill="#0d9488" />
+      <ellipse cx={236} cy={235} rx={9} ry={7} fill="#e8c49a" />
+      <rect x={158} y={197} width={24} height={33} rx={4} fill="#e8c49a" />
+      <ellipse cx={170} cy={158} rx={38} ry={36} fill="#e8c49a" />
+      <ellipse cx={170} cy={129} rx={38} ry={17} fill="#92400e" />
+      <rect x={132} y={129} width={76} height={15} fill="#92400e" />
+      <rect x={132} y={138} width={7} height={15} rx={3} fill="#92400e" />
+      <rect x={201} y={138} width={7} height={15} rx={3} fill="#92400e" />
+      <ellipse cx={210} cy={133} rx={11} ry={5} fill="#92400e" />
+      <ellipse cx={222} cy={137} rx={7} ry={4} fill="#78350f" />
+      <ellipse
+        cx={155}
+        cy={133}
+        rx={15}
+        ry={5}
+        fill="#b45309"
+        opacity={0.5}
+      />
+      <ellipse cx={132} cy={160} rx={6} ry={8} fill="#e8c49a" />
+      <ellipse cx={208} cy={160} rx={6} ry={8} fill="#e8c49a" />
+      <circle cx={155} cy={156} r={7} fill="#1a1008" />
+      <circle cx={185} cy={156} r={7} fill="#1a1008" />
+      <circle cx={156} cy={154} r={3} fill="#d97706" />
+      <circle cx={186} cy={154} r={3} fill="#d97706" />
+      <circle cx={158} cy={152} r={1.5} fill="#ffffff" opacity={0.9} />
+      <circle cx={188} cy={152} r={1.5} fill="#ffffff" opacity={0.9} />
+      <path
+        d="M148 151 Q155 147 162 151"
+        fill="none"
+        stroke="#1a1008"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M178 151 Q185 147 192 151"
+        fill="none"
+        stroke="#1a1008"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M146 143 Q155 137 164 140"
+        fill="none"
+        stroke="#92400e"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M176 140 Q185 137 194 143"
+        fill="none"
+        stroke="#92400e"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M166 164 Q164 173 160 175 Q170 178 180 175 Q176 173 174 164"
+        fill="none"
+        stroke="#c4845a"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M155 184 Q163 194 170 196 Q177 194 185 184"
+        fill="none"
+        stroke="#c4845a"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M157 187 Q170 195 183 187 Q177 192 170 193 Q163 192 157 187"
+        fill="#f8fafc"
+        opacity={0.9}
+      />
+      <ellipse cx={143} cy={170} rx={8} ry={5} fill="#f87171" opacity={0.25} />
+      <ellipse cx={197} cy={170} rx={8} ry={5} fill="#f87171" opacity={0.25} />
+      <rect x={131} y={308} width={31} height={27} rx={6} fill="#0f766e" />
+      <rect x={178} y={308} width={31} height={27} rx={6} fill="#0f766e" />
+      <rect x={124} y={326} width={41} height={9} rx={5} fill="#f8fafc" />
+      <rect x={171} y={326} width={41} height={9} rx={5} fill="#f8fafc" />
+      <rect
+        x={126}
+        y={327}
+        width={19}
+        height={4}
+        rx={2}
+        fill="#0d9488"
+        opacity={0.5}
+      />
+      <rect
+        x={173}
+        y={327}
+        width={19}
+        height={4}
+        rx={2}
+        fill="#0d9488"
+        opacity={0.5}
+      />
+    </g>
+  );
+}
+
+function DecisionMakerBlockerBody() {
+  return (
+    <g>
+      <circle cx={170} cy={260} r={180} fill="#7c3aed" opacity={0.25} />
+      <rect x={120} y={230} width={28} height={88} rx={6} fill="#6d28d9" />
+      <rect x={192} y={230} width={28} height={88} rx={6} fill="#6d28d9" />
+      <rect x={148} y={230} width={44} height={88} rx={3} fill="#7c3aed" />
+      <rect x={154} y={230} width={32} height={50} rx={2} fill="#fde68a" />
+      <path d="M152,230 Q170,248 188,230" fill="#5b21b6" />
+      <ellipse cx={170} cy={168} rx={44} ry={22} fill="#1e293b" opacity={0.4} />
+      <rect x={100} y={246} width={28} height={15} rx={7} fill="#6d28d9" />
+      <ellipse cx={105} cy={253} rx={8} ry={7} fill="#c4956a" />
+      <circle
+        cx={101}
+        cy={258}
+        r={3}
+        fill="none"
+        stroke="#f59e0b"
+        strokeWidth={2}
+      />
+      <circle cx={101} cy={258} r={1} fill="#fbbf24" />
+      <rect x={212} y={232} width={17} height={44} rx={8} fill="#6d28d9" />
+      <ellipse cx={220} cy={277} rx={7} ry={6} fill="#c4956a" />
+      <rect x={215} y={266} width={11} height={18} rx={3} fill="#111827" />
+      <rect
+        x={216}
+        y={268}
+        width={9}
+        height={14}
+        rx={2}
+        fill="#8b5cf6"
+        opacity={0.8}
+      />
+      <rect x={158} y={204} width={24} height={30} rx={4} fill="#c4956a" />
+      <ellipse cx={170} cy={162} rx={38} ry={36} fill="#c4956a" />
+      <ellipse cx={170} cy={132} rx={38} ry={17} fill="#6b3a1f" />
+      <rect x={132} y={132} width={76} height={15} fill="#6b3a1f" />
+      <rect x={132} y={144} width={11} height={38} rx={5} fill="#6b3a1f" />
+      <rect x={197} y={144} width={11} height={38} rx={5} fill="#6b3a1f" />
+      <ellipse
+        cx={156}
+        cy={137}
+        rx={14}
+        ry={5}
+        fill="#92400e"
+        opacity={0.5}
+      />
+      <line
+        x1={170}
+        y1={132}
+        x2={170}
+        y2={150}
+        stroke="#4a2510"
+        strokeWidth={1.5}
+      />
+      <circle cx={135} cy={168} r={3} fill="#f59e0b" />
+      <circle cx={135} cy={177} r={2} fill="#fbbf24" />
+      <circle cx={205} cy={168} r={3} fill="#f59e0b" />
+      <circle cx={205} cy={177} r={2} fill="#fbbf24" />
+      <ellipse cx={155} cy={162} rx={6} ry={4} fill="#1a1008" />
+      <ellipse cx={185} cy={162} rx={6} ry={4} fill="#1a1008" />
+      <ellipse cx={156} cy={161} rx={2.5} ry={2} fill="#92400e" />
+      <ellipse cx={186} cy={161} rx={2.5} ry={2} fill="#92400e" />
+      <circle cx={158} cy={160} r={1} fill="#ffffff" opacity={0.8} />
+      <circle cx={188} cy={160} r={1} fill="#ffffff" opacity={0.8} />
+      <path
+        d="M149 158 Q155 154 161 158"
+        fill="none"
+        stroke="#1a1008"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M179 158 Q185 154 191 158"
+        fill="none"
+        stroke="#1a1008"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M147 152 Q155 147 163 150"
+        fill="none"
+        stroke="#6b3a1f"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M177 150 Q185 147 193 152"
+        fill="none"
+        stroke="#6b3a1f"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M166 169 Q164 178 160 180 Q170 184 180 180 Q176 178 174 169"
+        fill="none"
+        stroke="#a06040"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M159 192 Q165 196 170 194 Q175 196 181 192"
+        fill="none"
+        stroke="#a06040"
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <rect x={131} y={311} width={30} height={27} rx={6} fill="#6d28d9" />
+      <rect x={179} y={311} width={30} height={27} rx={6} fill="#6d28d9" />
+      <rect x={125} y={330} width={40} height={9} rx={5} fill="#4c1d95" />
+      <rect x={173} y={330} width={40} height={9} rx={5} fill="#4c1d95" />
+    </g>
+  );
+}
+
+function PriceShopperBody() {
+  return (
+    <g>
+      <circle cx={170} cy={260} r={180} fill="#d97706" opacity={0.2} />
+      <rect x={119} y={228} width={102} height={90} rx={6} fill="#d97706" />
+      <rect x={147} y={272} width={46} height={25} rx={4} fill="#b45309" />
+      <rect
+        x={119}
+        y={240}
+        width={10}
+        height={72}
+        rx={3}
+        fill="#b45309"
+        opacity={0.6}
+      />
+      <rect
+        x={211}
+        y={240}
+        width={10}
+        height={72}
+        rx={3}
+        fill="#b45309"
+        opacity={0.6}
+      />
+      <line
+        x1={162}
+        y1={234}
+        x2={159}
+        y2={273}
+        stroke="#92400e"
+        strokeWidth={1.5}
+      />
+      <line
+        x1={178}
+        y1={234}
+        x2={181}
+        y2={273}
+        stroke="#92400e"
+        strokeWidth={1.5}
+      />
+      <rect x={214} y={228} width={18} height={50} rx={9} fill="#d97706" />
+      <ellipse cx={223} cy={279} rx={8} ry={7} fill="#e8c49a" />
+      <rect x={216} y={236} width={14} height={24} rx={3} fill="#111827" />
+      <rect
+        x={217}
+        y={238}
+        width={12}
+        height={20}
+        rx={2}
+        fill="#1e3a8a"
+        opacity={0.8}
+      />
+      <rect
+        x={218}
+        y={241}
+        width={9}
+        height={2}
+        rx={1}
+        fill="#34d399"
+        opacity={0.9}
+      />
+      <rect
+        x={218}
+        y={246}
+        width={7}
+        height={2}
+        rx={1}
+        fill="#f87171"
+        opacity={0.9}
+      />
+      <rect
+        x={218}
+        y={251}
+        width={8}
+        height={2}
+        rx={1}
+        fill="#fbbf24"
+        opacity={0.9}
+      />
+      <rect
+        x={218}
+        y={256}
+        width={6}
+        height={2}
+        rx={1}
+        fill="#34d399"
+        opacity={0.9}
+      />
+      <rect x={108} y={244} width={20} height={35} rx={8} fill="#d97706" />
+      <rect x={158} y={200} width={24} height={32} rx={4} fill="#e8c49a" />
+      <ellipse cx={170} cy={160} rx={38} ry={36} fill="#e8c49a" />
+      <ellipse cx={170} cy={130} rx={38} ry={17} fill="#1e1008" />
+      <rect x={132} y={130} width={76} height={15} fill="#1e1008" />
+      <rect x={132} y={140} width={8} height={17} rx={3} fill="#1e1008" />
+      <rect x={200} y={140} width={8} height={17} rx={3} fill="#1e1008" />
+      <ellipse
+        cx={149}
+        cy={132}
+        rx={7}
+        ry={4}
+        fill="#1e1008"
+        transform="rotate(-15,149,132)"
+      />
+      <ellipse
+        cx={190}
+        cy={132}
+        rx={6}
+        ry={4}
+        fill="#1e1008"
+        transform="rotate(10,190,132)"
+      />
+      <ellipse cx={170} cy={128} rx={5} ry={6} fill="#1e1008" />
+      <ellipse cx={132} cy={162} rx={6} ry={8} fill="#e8c49a" />
+      <ellipse cx={208} cy={162} rx={6} ry={8} fill="#e8c49a" />
+      <ellipse cx={155} cy={158} rx={6} ry={4} fill="#1a1008" />
+      <ellipse cx={185} cy={158} rx={6} ry={4} fill="#1a1008" />
+      <ellipse cx={156} cy={157} rx={2.5} ry={2} fill="#78350f" />
+      <ellipse cx={186} cy={157} rx={2.5} ry={2} fill="#78350f" />
+      <circle cx={158} cy={156} r={1} fill="#ffffff" opacity={0.8} />
+      <circle cx={188} cy={156} r={1} fill="#ffffff" opacity={0.8} />
+      <path
+        d="M147 149 Q155 145 163 148"
+        fill="none"
+        stroke="#1e1008"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M177 146 Q185 141 193 145"
+        fill="none"
+        stroke="#1e1008"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M166 166 Q164 174 160 176 Q170 179 180 176 Q176 174 174 166"
+        fill="none"
+        stroke="#c4845a"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M158 186 Q164 183 170 184 Q178 186 182 190"
+        fill="none"
+        stroke="#c4845a"
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <rect x={131} y={311} width={31} height={26} rx={6} fill="#92400e" />
+      <rect x={178} y={311} width={31} height={26} rx={6} fill="#92400e" />
+      <rect x={124} y={328} width={41} height={9} rx={5} fill="#e5e7eb" />
+      <rect x={171} y={328} width={41} height={9} rx={5} fill="#e5e7eb" />
+      <rect
+        x={126}
+        y={329}
+        width={19}
+        height={4}
+        rx={2}
+        fill="#d97706"
+        opacity={0.6}
+      />
+      <rect
+        x={173}
+        y={329}
+        width={19}
+        height={4}
+        rx={2}
+        fill="#d97706"
+        opacity={0.6}
+      />
+    </g>
+  );
+}
+
+function GhostBody() {
+  // Ghost gets className hooks (ghost-skin / ghost-dark / ghost-mid)
+  // so the .ghost-breakthrough CSS class on the root <svg> can repaint
+  // it in the open-wall blue palette when the Ghost's emotional wall
+  // finally comes down.
+  return (
+    <g>
+      <circle cx={170} cy={260} r={180} fill="#0f172a" opacity={0.9} />
+      <rect
+        x={20}
+        y={60}
+        width={4}
+        height={300}
+        rx={2}
+        fill="#1e293b"
+        opacity={0.6}
+      />
+      <rect
+        x={316}
+        y={60}
+        width={4}
+        height={300}
+        rx={2}
+        fill="#1e293b"
+        opacity={0.6}
+      />
+      <ellipse
+        cx={170}
+        cy={172}
+        rx={45}
+        ry={43}
+        fill="none"
+        stroke="#3b82f6"
+        strokeWidth={1.5}
+        opacity={0.15}
+      />
+      <rect
+        className="ghost-dark"
+        x={122}
+        y={238}
+        width={96}
+        height={82}
+        rx={6}
+        fill="#1e293b"
+      />
+      <line
+        x1={140}
+        y1={252}
+        x2={140}
+        y2={314}
+        stroke="#334155"
+        strokeWidth={1}
+        opacity={0.5}
+      />
+      <line
+        x1={150}
+        y1={252}
+        x2={150}
+        y2={314}
+        stroke="#334155"
+        strokeWidth={1}
+        opacity={0.5}
+      />
+      <line
+        x1={190}
+        y1={252}
+        x2={190}
+        y2={314}
+        stroke="#334155"
+        strokeWidth={1}
+        opacity={0.5}
+      />
+      <line
+        x1={200}
+        y1={252}
+        x2={200}
+        y2={314}
+        stroke="#334155"
+        strokeWidth={1}
+        opacity={0.5}
+      />
+      <ellipse
+        className="ghost-dark"
+        cx={170}
+        cy={178}
+        rx={44}
+        ry={24}
+        fill="#1e293b"
+        opacity={0.7}
+      />
+      <rect
+        className="ghost-dark"
+        x={105}
+        y={254}
+        width={24}
+        height={14}
+        rx={7}
+        fill="#1e293b"
+      />
+      <ellipse
+        className="ghost-skin"
+        cx={111}
+        cy={261}
+        rx={7}
+        ry={6}
+        fill="#b0bec5"
+        opacity={0.8}
+      />
+      <rect
+        className="ghost-dark"
+        x={211}
+        y={254}
+        width={24}
+        height={14}
+        rx={7}
+        fill="#1e293b"
+      />
+      <ellipse
+        className="ghost-skin"
+        cx={229}
+        cy={261}
+        rx={7}
+        ry={6}
+        fill="#b0bec5"
+        opacity={0.8}
+      />
+      <rect
+        className="ghost-skin"
+        x={159}
+        y={210}
+        width={22}
+        height={32}
+        rx={4}
+        fill="#b0bec5"
+        opacity={0.7}
+      />
+      <ellipse
+        className="ghost-skin"
+        cx={170}
+        cy={172}
+        rx={37}
+        ry={36}
+        fill="#b0bec5"
+        opacity={0.85}
+      />
+      <ellipse
+        className="ghost-dark"
+        cx={170}
+        cy={142}
+        rx={37}
+        ry={17}
+        fill="#374151"
+      />
+      <rect
+        className="ghost-dark"
+        x={133}
+        y={142}
+        width={74}
+        height={14}
+        fill="#374151"
+      />
+      <rect
+        className="ghost-dark"
+        x={133}
+        y={150}
+        width={9}
+        height={24}
+        rx={3}
+        fill="#374151"
+      />
+      <rect
+        className="ghost-dark"
+        x={198}
+        y={150}
+        width={9}
+        height={24}
+        rx={3}
+        fill="#374151"
+      />
+      <rect
+        className="ghost-dark"
+        x={149}
+        y={142}
+        width={4}
+        height={24}
+        rx={2}
+        fill="#374151"
+        opacity={0.8}
+      />
+      <rect
+        className="ghost-dark"
+        x={157}
+        y={142}
+        width={3}
+        height={19}
+        rx={2}
+        fill="#374151"
+        opacity={0.6}
+      />
+      <rect
+        className="ghost-dark"
+        x={181}
+        y={142}
+        width={4}
+        height={21}
+        rx={2}
+        fill="#374151"
+        opacity={0.7}
+      />
+      <ellipse
+        className="ghost-skin"
+        cx={133}
+        cy={173}
+        rx={5}
+        ry={8}
+        fill="#b0bec5"
+        opacity={0.7}
+      />
+      <ellipse
+        className="ghost-skin"
+        cx={207}
+        cy={173}
+        rx={5}
+        ry={8}
+        fill="#b0bec5"
+        opacity={0.7}
+      />
+      <ellipse
+        className="ghost-mid"
+        cx={154}
+        cy={177}
+        rx={5}
+        ry={3}
+        fill="#374151"
+      />
+      <ellipse
+        className="ghost-mid"
+        cx={186}
+        cy={177}
+        rx={5}
+        ry={3}
+        fill="#374151"
+      />
+      <ellipse
+        className="ghost-mid"
+        cx={155}
+        cy={178}
+        rx={2}
+        ry={1.5}
+        fill="#4b5563"
+      />
+      <ellipse
+        className="ghost-mid"
+        cx={187}
+        cy={178}
+        rx={2}
+        ry={1.5}
+        fill="#4b5563"
+      />
+      <path
+        className="ghost-skin"
+        d="M149 175 Q154 172 159 175"
+        fill="#b0bec5"
+        opacity={0.85}
+      />
+      <path
+        className="ghost-skin"
+        d="M181 175 Q186 172 191 175"
+        fill="#b0bec5"
+        opacity={0.85}
+      />
+      <path
+        d="M148 169 Q154 167 160 169"
+        fill="none"
+        stroke="#374151"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M180 169 Q186 167 192 169"
+        fill="none"
+        stroke="#374151"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M166 182 Q164 190 160 192 Q170 195 180 192 Q176 190 174 182"
+        fill="none"
+        stroke="#8da0b0"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <path
+        d="M160 202 Q165 200 170 201 Q175 200 180 202"
+        fill="none"
+        stroke="#8da0b0"
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <rect
+        className="ghost-dark"
+        x={133}
+        y={314}
+        width={29}
+        height={26}
+        rx={6}
+        fill="#1e293b"
+        transform="rotate(3,148,327)"
+      />
+      <rect
+        className="ghost-dark"
+        x={178}
+        y={314}
+        width={29}
+        height={26}
+        rx={6}
+        fill="#1e293b"
+        transform="rotate(-2,192,327)"
+      />
+      <rect x={127} y={331} width={38} height={8} rx={5} fill="#111827" />
+      <rect x={171} y={331} width={38} height={8} rx={5} fill="#111827" />
+    </g>
+  );
+}
+
+function ProspectSprite({
+  archetype,
+  animation,
+  wallDropped,
 }: {
-  grid: SpriteGrid;
-  palette: readonly string[];
-  pixel?: number;
+  archetype: string;
+  animation: AnimationState;
+  wallDropped?: boolean;
 }) {
-  const rows = grid.length;
-  const cols = grid[0]?.length ?? 0;
-  const rects: React.ReactElement[] = [];
-  for (let y = 0; y < rows; y++) {
-    const row = grid[y];
-    for (let x = 0; x < cols; x++) {
-      if (!row || x >= row.length) continue;
-      const ch = row[x];
-      if (ch === "." || ch === " ") continue;
-      const idx = ch.charCodeAt(0) - "1".charCodeAt(0);
-      if (idx < 0 || idx >= palette.length) continue;
-      rects.push(
-        <rect
-          key={`${x}-${y}`}
-          x={x * pixel}
-          y={y * pixel}
-          width={pixel}
-          height={pixel}
-          fill={palette[idx]}
-        />,
-      );
-    }
+  const key = archetypeSpriteKey(archetype);
+
+  let body: React.ReactElement;
+  switch (key) {
+    case "busy_professional":
+      body = <BusyProfessionalBody />;
+      break;
+    case "skeptic":
+      body = <SkepticBody />;
+      break;
+    case "enthusiast":
+      body = <EnthusiastBody />;
+      break;
+    case "decision_maker_blocker":
+      body = <DecisionMakerBlockerBody />;
+      break;
+    case "price_shopper":
+      body = <PriceShopperBody />;
+      break;
+    case "ghost":
+      body = <GhostBody />;
+      break;
+    default:
+      body = <SkepticBody />;
   }
+
+  let animClass = "fc-sprite-idle";
+  if (animation === "flinch" || animation === "flinch_breakthrough") {
+    animClass = "fc-sprite-flinch";
+  } else if (animation === "hardening") {
+    animClass = "fc-sprite-hardening";
+  } else if (animation === "leaving") {
+    animClass = "fc-sprite-leaving";
+  } else if (animation === "converted") {
+    animClass = "fc-sprite-converted";
+  }
+
+  const ghostBreakthrough =
+    key === "ghost" &&
+    (animation === "flinch_breakthrough" || wallDropped === true);
+
   return (
     <svg
-      width={cols * pixel}
-      height={rows * pixel}
-      viewBox={`0 0 ${cols * pixel} ${rows * pixel}`}
-      shapeRendering="crispEdges"
+      width="100%"
+      height="100%"
+      viewBox="0 0 340 420"
+      preserveAspectRatio="xMidYMid meet"
+      className={`${animClass}${ghostBreakthrough ? " ghost-breakthrough" : ""}`}
       style={{ display: "block" }}
     >
-      {rects}
+      {body}
     </svg>
   );
 }
@@ -888,31 +1721,12 @@ function FloatingLabelDisplay({
 function ProspectSpriteArea({
   archetype,
   animation,
-  palette,
-  speakingFrame,
+  wallDropped,
 }: {
   archetype: Archetype;
   animation: AnimationState;
-  palette: readonly string[];
-  speakingFrame: number;
+  wallDropped: boolean;
 }) {
-  const baseGrid = SPRITES_IDLE[archetype] ?? SPRITE_SKEPTIC;
-  const grid =
-    animation === "speaking" && speakingFrame % 2 === 1
-      ? withSpeakingMouth(baseGrid)
-      : baseGrid;
-
-  let animClass = "fc-sprite-idle";
-  if (animation === "flinch" || animation === "flinch_breakthrough") {
-    animClass = "fc-sprite-flinch";
-  } else if (animation === "hardening") {
-    animClass = "fc-sprite-hardening";
-  } else if (animation === "leaving") {
-    animClass = "fc-sprite-leaving";
-  } else if (animation === "converted") {
-    animClass = "fc-sprite-converted";
-  }
-
   return (
     <div
       style={{
@@ -926,8 +1740,12 @@ function ProspectSpriteArea({
         justifyContent: "center",
       }}
     >
-      <div className={animClass} style={{ width: 64, height: 64 }}>
-        <PixelSprite grid={grid} palette={palette} pixel={4} />
+      <div style={{ width: 64, height: 64 }}>
+        <ProspectSprite
+          archetype={archetype}
+          animation={animation}
+          wallDropped={wallDropped}
+        />
       </div>
     </div>
   );
@@ -969,7 +1787,6 @@ function BattleView(props: {
   onVoiceSend: () => void;
   onVoiceRerecord: () => void;
 }) {
-  const palette = pickPalette(props.archetype, props.wallDropped, false);
   const truncatedName = props.prospectName.toUpperCase().slice(0, 12);
   // First name only — the YOU header has to share 160px with the CON
   // bar (~75px), so anything past ~8 chars wraps to a second line.
@@ -977,9 +1794,6 @@ function BattleView(props: {
     .split(/\s+/)[0]
     .toUpperCase()
     .slice(0, 8);
-  const speakingFrame = useSpeakingFrame(
-    props.dialog.kind === "prospect_speaking" && !props.dialog.done,
-  );
 
   // Canvas now hosts only zones 1-3 (160×96). The dialog box (formerly
   // zone 4) renders as standard HTML below the canvas at readable
@@ -1092,8 +1906,7 @@ function BattleView(props: {
           <ProspectSpriteArea
             archetype={props.archetype}
             animation={props.animation}
-            palette={palette}
-            speakingFrame={speakingFrame}
+            wallDropped={props.wallDropped}
           />
           {props.pendingLabel ? (
             <FloatingLabelDisplay
@@ -1216,16 +2029,6 @@ type VoicePhase =
   | "transcribing"
   | "confirming"
   | "error";
-
-function useSpeakingFrame(active: boolean): number {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setFrame((f) => f + 1), 200);
-    return () => clearInterval(id);
-  }, [active]);
-  return frame;
-}
 
 // ───────────────────────────────────────────────────────────────────
 // HTML dialog box — renders BELOW the pixel canvas at readable sizes.
@@ -1829,12 +2632,8 @@ function VictoryView({
       >
         <PixelText size={8}>★ CONSULTATION ★</PixelText>
         <PixelText size={8}>COMPLETE</PixelText>
-        <div className="fc-sprite-converted" style={{ marginTop: 4 }}>
-          <PixelSprite
-            grid={SPRITES_IDLE[archetype] ?? SPRITE_SKEPTIC}
-            palette={DEFAULT_PALETTE}
-            pixel={2}
-          />
+        <div style={{ marginTop: 4, width: 56, height: 70 }}>
+          <ProspectSprite archetype={archetype} animation="converted" />
         </div>
         <PixelText size={6}>XP: {rollingXp}</PixelText>
         <PixelText size={6} color="#306230" style={{ marginTop: 6 }}>
@@ -1888,12 +2687,8 @@ function DefeatView({
         <PixelText size={8} color="#e03030">
           ✗ PROSPECT LEFT
         </PixelText>
-        <div className="fc-sprite-leaving" style={{ marginTop: 4 }}>
-          <PixelSprite
-            grid={SPRITES_IDLE[archetype] ?? SPRITE_SKEPTIC}
-            palette={DEFEAT_PALETTE}
-            pixel={2}
-          />
+        <div style={{ marginTop: 4, width: 56, height: 70, opacity: 0.6 }}>
+          <ProspectSprite archetype={archetype} animation="leaving" />
         </div>
         <PixelText
           size={6}
@@ -3603,6 +4398,15 @@ function PixelGlobalStyles() {
       .fc-wave-bar {
         height: 6px;
         animation: fc-wave-kf 700ms ease-in-out infinite;
+      }
+      .ghost-breakthrough .ghost-skin {
+        fill: #b0d4f5 !important;
+      }
+      .ghost-breakthrough .ghost-dark {
+        fill: #1a3a5c !important;
+      }
+      .ghost-breakthrough .ghost-mid {
+        fill: #4a7ab0 !important;
       }
       @keyframes fc-float-shake-kf {
         0%,
