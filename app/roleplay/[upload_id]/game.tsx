@@ -2279,11 +2279,48 @@ export default function Game({
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(MUTE_STORAGE_KEY);
+      console.log(`[tts] mute hydrate: stored="${stored}"`);
       // eslint-disable-next-line react-hooks/set-state-in-effect
       if (stored === "1") setIsMuted(true);
     } catch {
       // localStorage unavailable (private mode, etc.) — ignore.
     }
+  }, []);
+
+  // Autoplay unlock — browsers block <audio>.play() until the user
+  // interacts with the document. We register a one-shot listener on
+  // window for the first click/touch/key event, play a silent WAV to
+  // satisfy the gesture requirement, and then let subsequent automatic
+  // playProspectTts() calls go through. This runs once per page load.
+  useEffect(() => {
+    let unlocked = false;
+    const unlock = () => {
+      if (unlocked) return;
+      unlocked = true;
+      try {
+        const silent = new Audio(
+          "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=",
+        );
+        silent.volume = 0;
+        void silent.play().catch(() => {
+          /* even silent play can be blocked early; that's fine */
+        });
+        console.log("[tts] audio unlock fired on first user gesture");
+      } catch (err) {
+        console.warn("[tts] audio unlock threw:", err);
+      }
+      window.removeEventListener("click", unlock, true);
+      window.removeEventListener("touchend", unlock, true);
+      window.removeEventListener("keydown", unlock, true);
+    };
+    window.addEventListener("click", unlock, true);
+    window.addEventListener("touchend", unlock, true);
+    window.addEventListener("keydown", unlock, true);
+    return () => {
+      window.removeEventListener("click", unlock, true);
+      window.removeEventListener("touchend", unlock, true);
+      window.removeEventListener("keydown", unlock, true);
+    };
   }, []);
   const toggleMuted = useCallback(() => {
     setIsMuted((prev) => {
@@ -2323,25 +2360,52 @@ export default function Game({
 
   const playProspectTts = useCallback(
     async (text: string, archetype: Archetype) => {
-      if (isMuted) return;
+      console.log(
+        `[tts] playProspectTts called: muted=${isMuted} archetype="${archetype}" textLen=${text.length}`,
+      );
+      if (isMuted) {
+        console.log("[tts] skipped — muted");
+        return;
+      }
       const voiceId = ARCHETYPE_VOICE_IDS[archetypeVoiceKey(archetype)];
-      if (!voiceId || voiceId === "PLACEHOLDER") return;
+      if (!voiceId || voiceId === "PLACEHOLDER") {
+        console.log(
+          `[tts] skipped — no voiceId for archetypeKey="${archetypeVoiceKey(archetype)}"`,
+        );
+        return;
+      }
       // Stop anything still playing from the previous turn before
       // kicking off a new fetch.
       stopProspectTts();
       try {
+        console.log(
+          `[tts] fetching /api/roleplay/tts voiceId=${voiceId.slice(0, 8)}…`,
+        );
         const res = await fetch("/api/roleplay/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text, voiceId }),
         });
         if (!res.ok) {
-          console.warn(`[tts] /api/roleplay/tts returned ${res.status}`);
+          const errText = await res.text().catch(() => "");
+          console.warn(
+            `[tts] /api/roleplay/tts returned ${res.status}: ${errText.slice(0, 200)}`,
+          );
           return;
         }
         const blob = await res.blob();
+        console.log(
+          `[tts] blob received: type="${blob.type}" size=${blob.size} bytes`,
+        );
+        if (blob.size === 0) {
+          console.warn("[tts] empty blob — aborting playback");
+          return;
+        }
         // If the rep muted while we were waiting, bail before playing.
-        if (isMuted) return;
+        if (isMuted) {
+          console.log("[tts] muted while fetching — discarding blob");
+          return;
+        }
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         audio.onended = () => {
@@ -2352,6 +2416,7 @@ export default function Game({
           }
         };
         audio.onerror = () => {
+          console.warn("[tts] audio element errored", audio.error);
           if (audioRef.current === audio) audioRef.current = null;
           if (audioUrlRef.current === url) {
             URL.revokeObjectURL(url);
@@ -2360,12 +2425,16 @@ export default function Game({
         };
         audioRef.current = audio;
         audioUrlRef.current = url;
-        await audio.play().catch((err) => {
-          // Autoplay can be blocked until the user interacts with the
-          // page. Swallow the rejection; the rest of the turn still
-          // proceeds without audio.
-          console.warn("[tts] audio.play() rejected:", err);
-        });
+        await audio.play().then(
+          () => console.log("[tts] audio.play() started"),
+          (err) => {
+            // Autoplay can be blocked until the user interacts with the
+            // page. The unlock effect above tries to satisfy this on the
+            // first click — but if the page never received one before
+            // Phase A, this rejection is expected.
+            console.warn("[tts] audio.play() rejected:", err);
+          },
+        );
       } catch (err) {
         console.warn("[tts] fetch failed:", err);
       }

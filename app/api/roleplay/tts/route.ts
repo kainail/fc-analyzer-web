@@ -33,6 +33,9 @@ export async function POST(request: Request) {
   }
 
   const apiKey = process.env.ELEVENLABS_API_KEY;
+  console.log(
+    `[tts] ELEVENLABS_API_KEY ${apiKey ? `present (len=${apiKey.length})` : "MISSING"}`,
+  );
   if (!apiKey) {
     return Response.json(
       { error: "ELEVENLABS_API_KEY is not configured" },
@@ -53,6 +56,10 @@ export async function POST(request: Request) {
   if (typeof body.voiceId !== "string" || body.voiceId.length === 0) {
     return Response.json({ error: "voiceId is required" }, { status: 400 });
   }
+
+  console.log(
+    `[tts] forwarding to ElevenLabs voiceId=${body.voiceId.slice(0, 8)}… textLen=${body.text.length}`,
+  );
 
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(body.voiceId)}/stream`;
 
@@ -93,11 +100,18 @@ export async function POST(request: Request) {
     );
   }
 
-  // Stream the MP3 bytes straight through to the client.
-  return new Response(upstream.body, {
+  // Buffer the full payload before responding so we can set
+  // Content-Length and log the size. Streaming through Next's edge
+  // proxy occasionally trips up Audio element decoders that want a
+  // known length up front.
+  const audioBuf = Buffer.from(await upstream.arrayBuffer());
+  console.log(`[tts] ElevenLabs returned ${audioBuf.byteLength} bytes`);
+
+  return new Response(audioBuf, {
     status: 200,
     headers: {
       "Content-Type": "audio/mpeg",
+      "Content-Length": String(audioBuf.byteLength),
       "Cache-Control": "no-store",
     },
   });
