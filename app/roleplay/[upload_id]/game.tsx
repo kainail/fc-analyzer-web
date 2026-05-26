@@ -1591,18 +1591,6 @@ function PixelCanvas({
         }}
       >
         {children}
-        {/* scanline overlay */}
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: 0,
-            pointerEvents: "none",
-            backgroundImage:
-              "repeating-linear-gradient(180deg, rgba(0,0,0,0.15) 0, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px)",
-            mixBlendMode: "multiply",
-          }}
-        />
       </div>
     </div>
   );
@@ -1630,16 +1618,16 @@ function ResistanceBar({
 }) {
   const pct = Math.max(0, Math.min(100, value));
   const w = Math.round((pct / 100) * 48);
-  let color: string = "#8bac0f";
-  if (flash) color = "#9bbc0f";
-  else if (pct < 25) color = "#306230";
+  let color: string = "#6366f1";
+  if (flash) color = "#818cf8";
+  else if (pct < 25) color = "#4338ca";
   return (
     <div
       style={{
         width: 48,
         height: 6,
-        background: "#0f380f",
-        border: "1px solid #0f380f",
+        background: "#1f2937",
+        border: "1px solid #1f2937",
         position: "relative",
       }}
     >
@@ -1848,7 +1836,7 @@ function BattleView(props: {
           style={{
             width: 160,
             height: 96,
-            background: "#0f380f",
+            background: "#0d1117",
             position: "absolute",
             top: 0,
             left: 0,
@@ -1856,7 +1844,7 @@ function BattleView(props: {
             transformOrigin: "top left",
             imageRendering: "pixelated",
             overflow: "hidden",
-            color: "#9bbc0f",
+            color: "#e2e8f0",
             fontFamily: "var(--font-pixel), monospace",
           }}
         >
@@ -1877,6 +1865,7 @@ function BattleView(props: {
           >
             <PixelText
               size={6}
+              color="#e2e8f0"
               style={{
                 whiteSpace: "nowrap",
                 overflow: "hidden",
@@ -1894,7 +1883,9 @@ function BattleView(props: {
                 flexShrink: 0,
               }}
             >
-              <PixelText size={6}>RES</PixelText>
+              <PixelText size={6} color="#e2e8f0">
+                RES
+              </PixelText>
               <ResistanceBar
                 value={props.resistance}
                 flash={props.resistanceFlash}
@@ -1930,11 +1921,12 @@ function BattleView(props: {
               alignItems: "center",
               justifyContent: "space-between",
               boxSizing: "border-box",
-              borderTop: "1px solid #306230",
+              borderTop: "1px solid #1f2937",
             }}
           >
             <PixelText
               size={6}
+              color="#e2e8f0"
               style={{
                 whiteSpace: "nowrap",
                 overflow: "hidden",
@@ -1952,23 +1944,13 @@ function BattleView(props: {
                 flexShrink: 0,
               }}
             >
-              <PixelText size={6}>CON</PixelText>
+              <PixelText size={6} color="#e2e8f0">
+                CON
+              </PixelText>
               <ResistanceBar value={props.confidence} flash={false} />
             </div>
           </div>
 
-          {/* scanline overlay (inside the scaled canvas only) */}
-          <div
-            aria-hidden
-            style={{
-              position: "absolute",
-              inset: 0,
-              pointerEvents: "none",
-              backgroundImage:
-                "repeating-linear-gradient(180deg, rgba(0,0,0,0.15) 0, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px)",
-              mixBlendMode: "multiply",
-            }}
-          />
         </div>
 
         {/* Mute toggle — overlay outside the scaled canvas, top-right of
@@ -2036,7 +2018,7 @@ type VoicePhase =
 // keeps its retro feel; the dialog gets HTML-native legibility.
 // ───────────────────────────────────────────────────────────────────
 
-const DIALOG_BORDER = "#8bac0f";
+const DIALOG_BORDER = "#6366f1";
 
 function HtmlDialogBox(props: {
   prospectName: string;
@@ -3160,6 +3142,26 @@ export default function Game({
   // it's available synchronously the moment session/start returns.
   const archetypeRef = useRef<Archetype | null>(null);
   const [isMuted, setIsMuted] = useState(false);
+  // isMutedRef mirrors isMuted but is updated synchronously in the
+  // toggle handler so playProspectTts (which reads it on every call)
+  // never sees a stale value mid-flight.
+  const isMutedRef = useRef(false);
+  // The text of the prospect line currently on screen. Set whenever a
+  // new line begins typing; cleared on session reset / outcome. Used
+  // by the unmute handler to replay the current line when the rep
+  // un-mutes mid-turn.
+  const currentProspectLineRef = useRef<string | null>(null);
+  // Forward ref to playProspectTts so toggleMuted can call the latest
+  // memoized version without depending on its identity (avoids
+  // re-creating toggleMuted whenever playProspectTts changes).
+  const playProspectTtsRef = useRef<
+    | ((text: string) => Promise<{ play: () => void; durationMs: number } | null>)
+    | null
+  >(null);
+  // The current dialog phase, mirrored to a ref so toggleMuted can
+  // decide whether the prospect line is still on-screen without
+  // closing over dialog state.
+  const dialogKindRef = useRef<DialogMode["kind"] | null>(null);
   // Hydrate the mute preference from localStorage after mount. We
   // can't read it synchronously during render because that would
   // mismatch the server-rendered HTML — so the post-mount setState is
@@ -3168,8 +3170,10 @@ export default function Game({
     try {
       const stored = window.localStorage.getItem(MUTE_STORAGE_KEY);
       console.log(`[tts] mute hydrate: stored="${stored}"`);
+      const muted = stored === "1";
+      isMutedRef.current = muted;
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (stored === "1") setIsMuted(true);
+      if (muted) setIsMuted(true);
     } catch {
       // localStorage unavailable (private mode, etc.) — ignore.
     }
@@ -3211,24 +3215,44 @@ export default function Game({
     };
   }, []);
   const toggleMuted = useCallback(() => {
-    setIsMuted((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(MUTE_STORAGE_KEY, next ? "1" : "0");
-      } catch {
-        // best-effort
-      }
-      if (next && audioRef.current) {
-        // Killing audio in flight if the rep mutes mid-playback.
+    const next = !isMutedRef.current;
+    isMutedRef.current = next;
+    setIsMuted(next);
+    try {
+      window.localStorage.setItem(MUTE_STORAGE_KEY, next ? "1" : "0");
+    } catch {
+      // best-effort
+    }
+    if (next) {
+      // Muting — kill any audio in flight.
+      if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
-        if (audioUrlRef.current) {
-          URL.revokeObjectURL(audioUrlRef.current);
-          audioUrlRef.current = null;
+      }
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
+    } else {
+      // Unmuting — if a prospect line is still on screen (Phase A
+      // typewriter or Phase E coaching whisper), replay it now so the
+      // rep hears the line they just un-muted to listen to.
+      const line = currentProspectLineRef.current;
+      const phase = dialogKindRef.current;
+      const inProspectPhase =
+        phase === "prospect_speaking" ||
+        phase === "exit_line" ||
+        phase === "coaching";
+      if (line && inProspectPhase) {
+        const playFn = playProspectTtsRef.current;
+        if (playFn) {
+          console.log("[tts] unmute mid-turn — replaying current line");
+          void playFn(line).then((ready) => {
+            ready?.play();
+          });
         }
       }
-      return next;
-    });
+    }
   }, []);
 
   const stopProspectTts = useCallback(() => {
@@ -3257,10 +3281,11 @@ export default function Game({
       text: string,
     ): Promise<{ play: () => void; durationMs: number } | null> => {
       const archetype = archetypeRef.current;
+      const muted = isMutedRef.current;
       console.log(
-        `[tts] playProspectTts called: muted=${isMuted} archetype="${archetype ?? "null"}" textLen=${text.length}`,
+        `[tts] playProspectTts called: muted=${muted} archetype="${archetype ?? "null"}" textLen=${text.length}`,
       );
-      if (isMuted) {
+      if (muted) {
         console.log("[tts] skipped — muted");
         return null;
       }
@@ -3302,7 +3327,7 @@ export default function Game({
           console.warn("[tts] empty blob — aborting playback");
           return null;
         }
-        if (isMuted) {
+        if (isMutedRef.current) {
           console.log("[tts] muted while fetching — discarding blob");
           return null;
         }
@@ -3361,7 +3386,7 @@ export default function Game({
           durationMs,
           play: () => {
             // If the rep muted between metadata-load and play, bail.
-            if (isMuted || audioRef.current !== audio) return;
+            if (isMutedRef.current || audioRef.current !== audio) return;
             audio.play().then(
               () => console.log("[tts] audio.play() started"),
               (err) => {
@@ -3375,8 +3400,20 @@ export default function Game({
         return null;
       }
     },
-    [isMuted, stopProspectTts],
+    [stopProspectTts],
   );
+
+  // Keep the forward ref pointing at the latest playProspectTts so
+  // toggleMuted can fire it on unmute without depending on its identity.
+  useEffect(() => {
+    playProspectTtsRef.current = playProspectTts;
+  }, [playProspectTts]);
+
+  // Mirror the dialog phase so the unmute handler can decide whether
+  // a replay is appropriate without closing over dialog state.
+  useEffect(() => {
+    dialogKindRef.current = dialog.kind;
+  }, [dialog]);
 
   // Stop any audio on unmount so we don't leak handles or play after
   // the component is gone.
@@ -3539,6 +3576,9 @@ export default function Game({
           charsShown: 0,
           done: false,
         });
+        // Stash the line so the mute toggle can replay it if the rep
+        // un-mutes while it's still on screen.
+        currentProspectLineRef.current = data.prospect_line;
 
         let delayMs = TYPEWRITER_MS;
         let ready: { play: () => void; durationMs: number } | null = null;
@@ -4076,6 +4116,7 @@ export default function Game({
   const handlePlayAgain = useCallback(() => {
     setGameState("mode_select");
     archetypeRef.current = null;
+    currentProspectLineRef.current = null;
     setSession(null);
     setMode(null);
     setStartingMode(null);
