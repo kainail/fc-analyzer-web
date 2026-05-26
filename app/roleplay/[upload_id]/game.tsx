@@ -1776,8 +1776,8 @@ function BattleView(props: {
   onVoiceRerecord: () => void;
 }) {
   const truncatedName = props.prospectName.toUpperCase().slice(0, 12);
-  // First name only — the YOU header has to share 160px with the CON
-  // bar (~75px), so anything past ~8 chars wraps to a second line.
+  // First name only — the YOU header has to share 160px with the
+  // HEALTH bar (~75px), so anything past ~8 chars wraps to a second line.
   const repFirst = props.repName
     .split(/\s+/)[0]
     .toUpperCase()
@@ -1884,7 +1884,7 @@ function BattleView(props: {
               }}
             >
               <PixelText size={6} color="#e2e8f0">
-                RES
+                HEALTH
               </PixelText>
               <ResistanceBar
                 value={props.resistance}
@@ -1945,7 +1945,7 @@ function BattleView(props: {
               }}
             >
               <PixelText size={6} color="#e2e8f0">
-                CON
+                HEALTH
               </PixelText>
               <ResistanceBar value={props.confidence} flash={false} />
             </div>
@@ -4183,21 +4183,53 @@ export default function Game({
       ) : null}
 
       {gameState === "loading" ? (
-        <PixelCanvas>
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "#0d1117",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 24,
+            padding: 32,
+            fontFamily: "var(--font-pixel), monospace",
+          }}
+        >
           <div
             style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              fontSize: 28,
+              color: "#ffffff",
+              textAlign: "center",
+              lineHeight: 1.4,
+              maxWidth: 520,
+              wordBreak: "break-word",
             }}
           >
-            <PixelText size={8}>
-              CONNECTING<span className="fc-dots" />
-            </PixelText>
+            {prospectName}
           </div>
-        </PixelCanvas>
+          <div
+            style={{
+              fontSize: 12,
+              color: "#94a3b8",
+              letterSpacing: "0.15em",
+            }}
+          >
+            PREPARING SESSION…
+          </div>
+          <div
+            style={{
+              width: 200,
+              height: 4,
+              background: "#1f2937",
+              borderRadius: 2,
+              overflow: "hidden",
+            }}
+          >
+            <div className="fc-loading-fill" />
+          </div>
+        </div>
       ) : null}
 
       {gameState === "battle" && archetype ? (
@@ -4448,6 +4480,19 @@ function PixelGlobalStyles() {
       }
       .ghost-breakthrough .ghost-mid {
         fill: #4a7ab0 !important;
+      }
+      @keyframes fc-loading-kf {
+        0% {
+          width: 0%;
+        }
+        100% {
+          width: 100%;
+        }
+      }
+      .fc-loading-fill {
+        height: 100%;
+        background: #6366f1;
+        animation: fc-loading-kf 2s ease-in-out infinite;
       }
       @keyframes fc-float-shake-kf {
         0%,
