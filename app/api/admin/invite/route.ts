@@ -52,16 +52,21 @@ export async function POST(request: Request) {
     );
   }
 
-  // Redirect URL built from x-forwarded-* / Host so it works behind
-  // Railway's proxy AND in local dev.
+  // Invitations land on /sign-up so the invitee is forced through
+  // Clerk's hosted signup (password creation) before they reach
+  // /onboarding (their post-signup destination configured in Clerk).
+  // NEXT_PUBLIC_APP_URL wins when set; otherwise fall back to
+  // building the base from forwarded request headers so local dev
+  // and Railway both work without extra config.
   const proto =
     request.headers.get("x-forwarded-proto") ??
     (request.url.startsWith("https") ? "https" : "http");
   const host =
     request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  const redirectUrl = host
-    ? `${proto}://${host}/onboarding`
-    : "/onboarding";
+  const dynamicBase = host ? `${proto}://${host}` : "";
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") || dynamicBase;
+  const redirectUrl = baseUrl ? `${baseUrl}/sign-up` : "/sign-up";
 
   try {
     const client = await clerkClient();

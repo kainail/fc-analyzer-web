@@ -62,15 +62,17 @@ export async function POST(
     );
   }
 
-  // Redirect URL — same construction as the invite route.
+  // Redirect URL — same construction as the invite route. Lands on
+  // /sign-up so the invitee must set a password before /onboarding.
   const proto =
     request.headers.get("x-forwarded-proto") ??
     (request.url.startsWith("https") ? "https" : "http");
   const host =
     request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  const redirectUrl = host
-    ? `${proto}://${host}/onboarding`
-    : "/onboarding";
+  const dynamicBase = host ? `${proto}://${host}` : "";
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") || dynamicBase;
+  const redirectUrl = baseUrl ? `${baseUrl}/sign-up` : "/sign-up";
 
   // Revoke first so the new invitation's create doesn't collide on
   // a unique-email constraint (Clerk rejects two pending invitations
